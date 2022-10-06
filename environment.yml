@@ -1,0 +1,20 @@
+name: smoother
+channels:
+  - conda-forge
+dependencies:
+  - python<4.0
+  - pip
+  - scipy
+  - scikit-learn
+  - pytorch
+  - pandas
+  - matplotlib==3.5.3
+  - plotnine==0.8.0
+  - jupyterlab
+  - ipywidgets
+  - scanpy # for simulation
+  - python-igraph # for simulation
+  - leidenalg # for simulation
+  - pip:
+    - squidpy # for simulation
+    - fuzzy-c-means # for simulation

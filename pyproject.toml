@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Smoother"
+version = "0.1.0"
+description = "A Unified and Modular Framework to Incorporate Structural Dependency in Spatial Omics Data"
+authors = [
+  {name = "Jiayu Su"}
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = "<4"
