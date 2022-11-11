@@ -112,7 +112,7 @@ Classes
 
     ### Methods
 
-    `deconv(self, x, y, spatial_loss: smoother.models.losses.SpatialLoss = None, lambda_spatial_loss=0.0, verbose=False, quiet=False, solver=None, **kwargs)`
+    `deconv(self, x, y, spatial_loss: smoother.losses.SpatialLoss = None, lambda_spatial_loss=0.0, verbose=False, quiet=False, solver=None, **kwargs)`
     :   Solve the regression-based spatial deconvolution problem using cvxpy.
         
         Loss_total = Loss_model + `lambda_spatial_loss` * Loss_spatial
@@ -169,7 +169,7 @@ Classes
 
     ### Methods
 
-    `deconv(self, x, y, spatial_loss: smoother.models.losses.SpatialLoss = None, lambda_spatial_loss=0.0, top_loss: smoother.models.losses.TopLoss = None, lambda_top_loss=0.0, lr=0.001, max_epochs=1000, patience=10, tol=1e-05, init_with_lr_sol=True, verbose=True, quiet=False)`
+    `deconv(self, x, y, spatial_loss: smoother.losses.SpatialLoss = None, lambda_spatial_loss=0.0, top_loss: smoother.losses.TopLoss = None, lambda_top_loss=0.0, lr=0.001, max_epochs=1000, patience=10, tol=1e-05, init_with_lr_sol=True, verbose=True, quiet=False)`
     :   Deconvolute spatial-omics data with spatial loss.
         
         Loss_total = Loss_model + `lambda_spatial_loss` * Loss_spatial +

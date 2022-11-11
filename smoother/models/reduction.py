@@ -14,7 +14,7 @@ except ImportError:
 				  category=ImportWarning)
 	tl, non_negative_parafac, parafac = None, None, None
 
-from smoother.models.losses import SpatialLoss
+from smoother.losses import SpatialLoss
 
 class PCA(nn.Module):
 	"""Solving PCA using stochastic gradient descent."""

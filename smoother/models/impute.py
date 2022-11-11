@@ -6,7 +6,7 @@ from timeit import default_timer as timer
 from scipy.sparse import coo_matrix
 import torch
 import torch.nn as nn
-from smoother.models.losses import SpatialLoss
+from smoother.losses import SpatialLoss
 
 # optional imports for convex optimization
 try:

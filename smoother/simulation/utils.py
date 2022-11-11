@@ -11,7 +11,7 @@ import pandas as pd
 from scipy.sparse import csr_matrix,lil_matrix
 import anndata
 from tqdm import tqdm
-from smoother.models.weights import coordinate_to_weights_knn
+from smoother.weights import coordinate_to_weights_knn
 
 
 def sample_cell_indices(generation_snrna, annot_label, cell_count_df, cell_capture_eff_df):

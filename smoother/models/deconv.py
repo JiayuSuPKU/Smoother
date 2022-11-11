@@ -9,7 +9,7 @@ from scipy.sparse import coo_matrix
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from smoother.models.losses import SpatialLoss, TopLoss
+from smoother.losses import SpatialLoss, TopLoss
 
 # optional imports for convex optimization
 try:

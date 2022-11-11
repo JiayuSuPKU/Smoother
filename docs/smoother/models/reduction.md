@@ -53,7 +53,7 @@ Classes
     `init_with_pca(self, data)`
     :
 
-    `reduce(self, st_expr, spatial_loss: smoother.models.losses.SpatialLoss = None, lambda_spatial_loss=0.1, lambda_orth_loss=1, lr=0.001, max_epochs=1000, patience=10, tol=1e-05, optimizer='SGD', init_with_pca=True, verbose=True, quite=False)`
+    `reduce(self, st_expr, spatial_loss: smoother.losses.SpatialLoss = None, lambda_spatial_loss=0.1, lambda_orth_loss=1, lr=0.001, max_epochs=1000, patience=10, tol=1e-05, optimizer='SGD', init_with_pca=True, verbose=True, quite=False)`
     :
 
 `CPDecomposition(shape_tensor, dim_hidden, nonneg=True)`
@@ -67,7 +67,7 @@ Classes
 
     ### Methods
 
-    `decomposition_sp(self, target, spatial_loss: smoother.models.losses.SpatialLoss = None, lambda_spatial_loss=0.1, lr=0.001, max_epochs=1000, patience=10, init_with_tensorly=False, verbose=True, quite=False)`
+    `decomposition_sp(self, target, spatial_loss: smoother.losses.SpatialLoss = None, lambda_spatial_loss=0.1, lr=0.001, max_epochs=1000, patience=10, init_with_tensorly=False, verbose=True, quite=False)`
     :
 
     `forward(self) ‑> Callable[..., Any]`
@@ -169,7 +169,7 @@ Classes
         Args:
                 x (2D tensor): data to project, num_feature x num_sample.
 
-    `reduce(self, st_expr, spatial_loss: smoother.models.losses.SpatialLoss = None, lambda_spatial_loss=0.1, lr=0.001, max_epochs=1000, patience=10, tol=1e-05, init_with_svd=True, verbose=True, quite=False)`
+    `reduce(self, st_expr, spatial_loss: smoother.losses.SpatialLoss = None, lambda_spatial_loss=0.1, lr=0.001, max_epochs=1000, patience=10, tol=1e-05, init_with_svd=True, verbose=True, quite=False)`
     :   Reduce the dimension of the expression matrix.
         
         Args:

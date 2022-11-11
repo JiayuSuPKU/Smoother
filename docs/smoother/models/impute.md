@@ -5,7 +5,7 @@ Impute spatial feature of interest with spatial loss
 Classes
 -------
 
-`ImputeConvex(y_obs, spatial_loss_all: smoother.models.losses.SpatialLoss, fixed_obs=True, nonneg=False, **kwargs)`
+`ImputeConvex(y_obs, spatial_loss_all: smoother.losses.SpatialLoss, fixed_obs=True, nonneg=False, **kwargs)`
 :   Imputation solver implemented using cvxpy.
     
     Attributes:
@@ -69,7 +69,7 @@ Classes
     `set_variables(self)`
     :   Initialize parameters to estimate.
 
-`ImputeModel(y_obs, spatial_loss_all: smoother.models.losses.SpatialLoss, fixed_obs=True, nonneg=False, **kwargs)`
+`ImputeModel(y_obs, spatial_loss_all: smoother.losses.SpatialLoss, fixed_obs=True, nonneg=False, **kwargs)`
 :   Class for different implementations of spatial imputation.
     
     This class is designed for coorperative inheritance (mixin).
@@ -116,7 +116,7 @@ Classes
     `set_variables(self)`
     :   Set variables to impute.
 
-`ImputeTorch(y_obs, spatial_loss_all: smoother.models.losses.SpatialLoss, fixed_obs=True, nonneg=False, **kwargs)`
+`ImputeTorch(y_obs, spatial_loss_all: smoother.losses.SpatialLoss, fixed_obs=True, nonneg=False, **kwargs)`
 :   Imputation solver implemented using pytorch.
     
     Attributes:

@@ -1,5 +1,5 @@
-Namespace smoother.simulation
-=============================
+Module smoother.simulation
+==========================
 
 Sub-modules
 -----------

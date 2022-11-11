@@ -19,7 +19,7 @@ except ImportError:
 				  category=ImportWarning)
 	LevelSetLayer2D, PartialSumBarcodeLengths = None, None
 
-from smoother.models.weights import SpatialWeightMatrix, _normalize_coords
+from smoother.weights import SpatialWeightMatrix, _normalize_coords
 
 def kl_loss_scipy(p, weights = None):
 	"""Calculate KL divergence using scipy.
