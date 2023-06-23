@@ -746,7 +746,10 @@ class LinearRegressionConvex(DeconvModelConvex):
 
 		# use scipy sparse matrix to speed up computation
 		if sp_loss.use_sparse:
-			inv_cov = [psd_wrap(coo_matrix(t)) for t in inv_cov]
+			inv_cov = [psd_wrap(coo_matrix(
+				(t.coalesce().values().numpy(), t.coalesce().indices().numpy()),
+				shape=t.shape
+    		)) for t in inv_cov]
 
 		if len(inv_cov) == 1: # use the same covariance for all groups
 			for w_row in self.list_w_row:

@@ -166,20 +166,40 @@ class SpatialLoss(nn.Module):
 				# will use the same spatial weight matrix for all celltypes
 				# self.inv_cov: 1 x n_spot x n_spot
 				self.inv_cov = self.spatial_weights.get_inv_cov(
-					self.prior, scale_weights, cached=False, standardize=self.standardize_cov).unsqueeze(0)
+					self.prior, scale_weights, cached=False,
+    				standardize=self.standardize_cov,
+					return_sparse=use_sparse
+				).unsqueeze(0)
 				self.confidences = torch.ones(1) # group-specific variance
 			else: # use different spatial weight matrix per celltype
 				# self.inv_cov: n_group x n_spot x n_spot
 				self.inv_cov = torch.stack(
-					[swm.get_inv_cov(self.prior, self.scale_weights, cached=False,
-						standardize=self.standardize_cov)
-					for swm in self.spatial_weights], dim=0)
+					[swm.get_inv_cov(
+						self.prior, self.scale_weights, cached=False,
+						standardize=self.standardize_cov,
+						return_sparse=use_sparse)
+    				for swm in self.spatial_weights], dim=0)
 				self.confidences = torch.ones(len(self.spatial_weights)) # group-specific variance
 
-			# convert the inverse covariance matrix into a sparse matrix for efficient computation
-			if self.prior != 'sma' and self.use_sparse:
-				inv_cov_2d_sp = torch.block_diag(*[self.inv_cov[i] for i in range(self.inv_cov.shape[0])])
-				self.inv_cov_2d_sp = inv_cov_2d_sp.to_sparse()
+			# concatenate the inverse covariance matrix into a sparse diag matrix for efficient computation
+			# self.inv_cov_2d_sp.shape == n_group/1 * n_spot x n_group/1 * n_spot
+			if self.use_sparse:
+				if self.inv_cov.shape[0] == 1:
+					self.inv_cov_2d_sp = self.inv_cov[0]
+				else:
+					num_group = self.inv_cov.shape[0]
+					num_spot = self.inv_cov.shape[1]
+					indices = torch.concat(
+        				[self.inv_cov[i].coalesce().indices() + i * num_spot for i in range(num_group)],
+						dim=1
+					)
+					values = torch.concat(
+						[self.inv_cov[i].coalesce().values() for i in range(num_group)],
+						dim=0
+					)
+					self.inv_cov_2d_sp = torch.sparse_coo_tensor(
+						indices, values, (num_group * num_spot, num_group * num_spot)
+					).coalesce()
 
 	def _sanity_check(self) -> None:
 		"""Check whether the spatial loss is defined properly."""

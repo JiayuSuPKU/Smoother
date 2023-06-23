@@ -79,3 +79,7 @@ model.deconv(x, y, spatial_loss=spatial_loss, lambda_spatial_loss=1, ...)
 model = PCA(num_feature = y.shape[0], num_pc = 10)
 model.reduce(y, ...)
 ```
+
+## References:
+Su, Jiayu, et al. "A Unified Modular Framework to Incorporate Structural Dependency in Spatial Omics Data." bioRxiv (2022): 2022-10.
+https://www.biorxiv.org/content/10.1101/2022.10.25.513785v1

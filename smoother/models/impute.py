@@ -367,11 +367,13 @@ class ImputeConvex(ImputeModel):
 		# extract inverse covariance matrix
 		if not sp_loss.standardize_cov:
 			raise ValueError("Spatial covariance must be standardized.")
-		inv_cov = sp_loss.inv_cov[0]
+		inv_cov = sp_loss.inv_cov[0].coalesce()
 
 		# use scipy sparse matrix to speed up computation
 		if sp_loss.use_sparse:
-			inv_cov = psd_wrap(coo_matrix(inv_cov))
+			inv_cov = psd_wrap(coo_matrix(
+				(inv_cov.values().numpy(), inv_cov.indices().numpy()), inv_cov.shape
+			))
 
 		for i in range(self.n_feature):
 			self.spatial_loss_exp += \

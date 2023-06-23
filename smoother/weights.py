@@ -6,14 +6,17 @@ from collections import defaultdict
 import warnings
 import numpy as np
 import torch
+from torch.nn.functional import cosine_similarity, pairwise_distance
 from scipy.spatial import distance
+from sklearn.neighbors import NearestNeighbors
 
-def _normalize_coords(coords, min_zero = True):
+def _normalize_coords(coords, min_zero = True, return_scale = False):
 	"""Re-scale spatial coordinates.
 
 	Args:
 		coords (2D array): Spatial coordinates, num_spot x 2 (or 3).
 		min_zero (bool): If True, set minimum coordinate to 0.
+		return_scale (bool): If True, return the scaling factor.
 	"""
 	if not torch.is_tensor(coords):
 		if not isinstance(coords, np.ndarray):
@@ -27,8 +30,108 @@ def _normalize_coords(coords, min_zero = True):
 		coords_norm = coords.clone()
 
 	# set maximum coordinate to 1 (or -1)
-	coords_norm = coords_norm / coords_norm.abs().max()
+	scale = coords_norm.abs().max()
+	coords_norm = coords_norm / scale
+
+	# return scaling factor
+	if return_scale:
+		return coords_norm, scale
+
 	return coords_norm
+
+def coordinate_to_weights_knn_fast(coords, k = 6, symmetric = True, row_scale = True):
+	"""Calculate spatial weight matrix using k-nearest neighbours (sklearn).
+
+	Convert spatial coordinate to a spatial weight matrix where non-zero entries represent
+	interactions among k-nearest neighbours. Sparse tensor version.
+
+	Args:
+		coords (2D array): Spatial coordinates, num_spot x 2 (or 3).
+		k (int): Number of nearest neighbours to keep.
+		symmetric (bool): If True only keep mutual neighbors.
+		row_scale (bool): If True scale row sum of the spatial weight matrix to 1.
+
+	Returns:
+		weights: A sparse 2D tensor containing spatial weights, num_spot x num_spot.
+	"""
+
+	# use sklearn to find the k-nearest neighbors
+	nbrs = NearestNeighbors(n_neighbors = k + 1, metric='euclidean').fit(coords)
+	indices = nbrs.kneighbors(coords, return_distance=False)
+
+	# convert to binary sparse tensor (no self interaction)
+	# w_i.shape = (2, num_spot * k)
+	w_i = torch.tensor([[i, j] for i in range(len(indices)) for j in indices[i][1:]]).T
+	w_v = torch.ones(w_i.shape[1])
+	weights = torch.sparse_coo_tensor(w_i, w_v, (len(indices), len(indices)), dtype=torch.float32).coalesce()
+
+	if symmetric: # make weight matrix symmetric by keeping only mutual neighbors
+		weights = weights * weights.transpose(0, 1)
+
+	# set diagonal to 1 for spots with no neighbors
+	id_no_neighbors = torch.where(torch.sparse.sum(weights, 1).to_dense() == 0)[0]
+	weights = weights + torch.sparse_coo_tensor(
+		id_no_neighbors.repeat(2, 1),
+		torch.ones(len(id_no_neighbors)),
+		(len(indices), len(indices)), dtype=torch.float32
+	)
+	weights = weights.coalesce()
+
+	if row_scale: # scale row to sum to 1
+		row_sum = torch.sparse.sum(weights, 1).to_dense()
+		weights.values()[:] = weights.values() / row_sum[weights.indices()[0]]
+
+	return weights
+
+def coordinate_to_weights_dist_fast(coords, scale_coords = True, radius_cutoff = 1.0,
+							   		band_width = 0.1, dist_metric = 'euclidean', row_scale = True):
+	"""Calculate spatial weight matrix using distance band (sklearn).
+
+	Convert spatial coordinate to a spatial weight matrix where non-zero entries represent
+	interactions among neighbours defined by the distane threshold. Sparse tensor version.
+
+	Args:
+		coords (2D array): Spatial coordinates, num_spot x 2 (or 3).
+		scale_coords (bool): If True, scale coordinates to [0, 1].
+		radius_cutoff (float): Distance threshold (in the same unit as the coords input).
+		band_width (float): Specify the width of the Gaussian kernel, which is proportional
+			to the inverse rate of weight distance decay.
+		dist_metric (str): Distance metric.
+		row_scale (bool): If True scale row sum of the spatial weight matrix to 1.
+
+	Returns:
+		weights: A sparse 2D tensor containing spatial weights, num_spot x num_spot.
+	"""
+	if scale_coords: # rescale coordinates to [0, 1]
+		coords_norm, coords_scale = _normalize_coords(coords, min_zero=True, return_scale=True)
+		radius_cutoff = radius_cutoff / coords_scale
+	else:
+		coords_norm = coords.clone()
+
+	# use sklearn to find the nearest neighbors
+	nbrs = NearestNeighbors(radius=radius_cutoff, metric=dist_metric).fit(coords_norm)
+	distances, indices = nbrs.radius_neighbors(coords_norm, return_distance=True)
+
+	# convert to sparse tensor (no self interaction)
+	w_i = torch.tensor([[i, j] for i in range(len(indices)) for j in indices[i] if j!= i]).T
+	w_v = torch.tensor([distances[i][ind] for i in range(len(indices)) for ind, j in enumerate(indices[i]) if j!= i])
+	w_v = torch.exp(- w_v.pow(2) / (2 * band_width ** 2))
+	weights = torch.sparse_coo_tensor(w_i, w_v, (len(indices), len(indices)), dtype=torch.float32).coalesce()
+
+	# set diagonal to 1 for spots with no neighbors
+	id_no_neighbors = torch.where(torch.sparse.sum(weights, 1).to_dense() == 0)[0]
+	weights = weights + torch.sparse_coo_tensor(
+		id_no_neighbors.repeat(2, 1),
+		torch.ones(len(id_no_neighbors)),
+		(len(indices), len(indices)), dtype=torch.float32
+	)
+	weights = weights.coalesce()
+
+	if row_scale: # scale row to sum to 1
+		row_sum = torch.sparse.sum(weights, 1).to_dense()
+		weights.values()[:] = weights.values() / row_sum[weights.indices()[0]]
+
+	return weights
 
 def coordinate_to_weights_knn(coords, k = 6, symmetric = True, row_scale = True):
 	"""Calculate spatial weight matrix using k-nearest neighbours.
@@ -119,6 +222,72 @@ def coordinate_to_weights_dist(coords, scale_coords = True, q_threshold = 0.001,
 
 	return weights
 
+def calc_feature_similarity_sparse(
+    features : torch.Tensor, indices : torch.Tensor,
+    dist_metric = 'cosine', reduce = 'none', dim = 10, return_sparse = False):
+	"""Calculate pairwise feature similarity between spots for a given set of spot pairs.
+
+	Similarity `s` is transformed from distance `d` by
+	1) Cosine similarity: s = (1 - d).clamp(min = 0)
+	2) Others: s = exp(- d^2/(2 * band_width^2)))
+
+	Args:
+		features (2D tensor): Feature matrix, num_feature x num_spot.
+		indices (2D tensor): Pairs of spot indices of which to calculate the similarity, 2 x num_pairs.
+		dist_metric (str): Distance metric.
+		reduce (str): If `PCA`, calculate distance on the reduced PCA space.
+		dim (int): Number of dimension of the reduced space.
+		return_sparse (bool): If True, return the similarity matrix as a sparse tensor.
+
+	Returns:
+		feature_sim: A 2D tensor containing pairwise similarities, num_spot x num_spot.
+	"""
+
+	assert dist_metric in ['cosine', 'cos', 'euclidean', 'eu']
+	assert reduce in ['pca', 'mean', 'none']
+
+	# Dimension reduction
+	if reduce == 'pca':
+		# standardize and remove constant features
+		features_var = features.std(1) # feature level variance
+		features_scaled = (features - features.mean(1, keepdim=True)) / features_var[:, None]
+		features_scaled = features_scaled[features_var > 0,:]
+		# run pca
+		torch.manual_seed(0) # for repeatability, fix the random seed for pca_lowrank
+		_, _, v = torch.pca_lowrank(
+			features_scaled.T, center=False,
+			q = min(dim, features_scaled.shape[0])
+		)
+		features_reduced_T = torch.matmul(features_scaled.T, v)
+	else:
+		features_reduced_T = features.T
+
+	if dist_metric in ['euclidean', 'eu']: # euclidean distance
+    	# scale the maximum value to 1
+		features_reduced_T = _normalize_coords(features_reduced_T, min_zero=False)
+		# calculate pairwise distance of selected pairs
+		features_melt = features_reduced_T[indices] # 2 x num_pairs x dim
+		features_dist = pairwise_distance(features_melt[0], features_melt[1])
+		# convert distance to similarity
+		band_width = 0.1 # fixed band width in the gaussian kernel
+		features_sim_flat = torch.exp(- features_dist.pow(2) / (2 * band_width ** 2))
+	else: # cosine similarity
+		# calculate pairwise distance of selected pairs
+		features_melt = features_reduced_T[indices] # 2 x num_pairs x dim
+		features_sim_flat = cosine_similarity(features_melt[0], features_melt[1]).clamp(min = 0)
+
+	# convert to sparse tensor
+	features_sim = 	torch.sparse_coo_tensor(
+		indices, features_sim_flat,
+		torch.Size([features.shape[1], features.shape[1]]),
+		dtype=torch.float32
+	).coalesce()
+
+	if return_sparse:
+		return features_sim
+	else:
+		return features_sim.to_dense()
+
 
 def calc_feature_similarity(features : torch.Tensor, dist_metric = 'cosine',
 							reduce = 'pca', dim = 10):
@@ -126,7 +295,7 @@ def calc_feature_similarity(features : torch.Tensor, dist_metric = 'cosine',
 
 	Similarity `s` is transformed from distance `d` by
 	1) Cosine similarity: s = (1 - d).clamp(min = 0)
-	2) Others: s = f_scale(exp(- 1/d.std()))
+	2) Others: s = exp(- d^2/(2 * band_width^2)))
 
 	Args:
 		features (2D tensor): Feature matrix, num_feature x num_spot.
@@ -145,18 +314,22 @@ def calc_feature_similarity(features : torch.Tensor, dist_metric = 'cosine',
 		features_var = features.std(1) # feature level variance
 		features_scaled = (features - features.mean(1, keepdim=True)) / features_var[:, None]
 		features_scaled = features_scaled[features_var > 0,:]
-		# pca
-		_, _, v = torch.pca_lowrank(features_scaled.T, q = dim)
-		features_reduced = torch.matmul(features_scaled.T, v)
+		# run pca
+		torch.manual_seed(0) # for repeatability, fix the random seed for pca_lowrank
+		_, _, v = torch.pca_lowrank(
+			features_scaled.T, center=False,
+			q = min(dim, features_scaled.shape[0])
+		)
+		features_reduced_T = torch.matmul(features_scaled.T, v)
 	else:
-		features_reduced = features.T
+		features_reduced_T = features.T
 
 	if dist_metric in ['euclidean', 'eu']: # scale the maximum to 1
-		features_reduced = _normalize_coords(features_reduced.T, min_zero=False).T
+		features_reduced_T = _normalize_coords(features_reduced_T, min_zero=False)
 
 	# calculate pairwise distances and similarities
 	features_dist = torch.tensor(distance.squareform(
-		distance.pdist(features_reduced, metric=dist_metric)))
+		distance.pdist(features_reduced_T, metric=dist_metric)))
 
 	if dist_metric in ['cosine', 'cos']:
 		features_sim = (1 - features_dist).clamp(min = 0)
@@ -213,6 +386,48 @@ def get_histology_vector(image, x_pixel, y_pixel, spot_radius, scale_factor, pad
 
 	return spot_vec
 
+def calc_histology_similarity_sparse(
+    	coords, indices, image, scale_factors,
+		dist_metric = 'euclidean', reduce = 'none', dim = 3):
+	"""Calculate pairwise histology similarity between spots for a given set of points.
+
+	Args:
+		coords (2D array): Spatial coordinate matrix (in fullres pixel), num_spot x 2.
+		indices (2D tensor): Pairs of spot indices of which to calculate the similarity, 2 x num_pairs.
+		image (3D array): Histology image, num_pixel x num_pixel x num_channel.
+		scale_fators (dict): The JSON dictionary from 10x Visium's `scalefactors_json.json`
+			'spot_diameter_fullres' (float): Spot size (fullres)
+			'tissue_hires_scalef' (float): Scale factor that transforms fullres image to the given image.
+		reduce (str): How to compute histological similarity. Can be one of 'pca', 'mean', and 'none'.
+			If 'none', will concatenate pixel-level histology vectors of each spot and calculate distance.
+			If 'pca', will concatenate pixel-level histology vectors of each spot, apply PCA to reduce
+				the dimension of the histology space, then calculate the distance.
+			If 'mean', will average the histology vector of each spot over its covering area.
+		dim (int): Number of dimension of the reduced space.
+
+	Returns:
+		hist_sim: A 2D tensor containing pairwise histology similarities, num_spot x num_spot.
+	"""
+	spot_radius = scale_factors['spot_diameter_fullres']/2
+	scale_factor = scale_factors['tissue_hires_scalef']
+
+	assert reduce in ['pca', 'mean', 'none']
+
+	# extract histology vectors per location
+	padding = (reduce != 'mean')
+	hist_vec = np.apply_along_axis(lambda arr: \
+		get_histology_vector(image, arr[0], arr[1], spot_radius, scale_factor, padding), 1, coords)
+
+	# num_hist_feature x num_spot
+	hist_vec = torch.tensor(hist_vec).T
+
+	# calculate similarity
+	hist_sim = calc_feature_similarity_sparse(
+    	hist_vec, indices, dist_metric = dist_metric,
+		reduce = reduce, dim = dim, return_sparse=True
+	)
+
+	return hist_sim
 
 def calc_histology_similarity(coords, image, scale_factors,
 							  dist_metric = 'euclidean', reduce = 'pca', dim = 3):
@@ -295,6 +510,102 @@ def calc_weights_spagcn(coords, image, scale_factors,
 	swm = coordinate_to_weights_dist(coords_xyz, scale_coords=False, band_width=band_width)
 
 	return swm
+
+
+def sparse_weight_to_inv_cov(weights, model, l = 1, standardize = False, return_sparse = False):
+	"""Convert a spatial weight matrix to an inverse covariance matrix. Sparse version.
+
+	Calculate the covariance structure using spatial weights. Different spatial process models
+	impose different structures. Check model descriptions for more details.
+
+	Args:
+		weights (Sparse tensor): Spatial weight matrix, num_spot x num_spot.
+		model (str): Spatial process model to use, can be one of 'sma','sar', 'isar', 'car', 'icar'.
+		l (float): Smoothing effect size.
+		standardize (bool): If True, return the standardized inverse covariance matrix (inv_corr).
+		return_sparse (bool): If True, return a sparse tensor. Note that the inverse covariance matrix of
+  			the SMA model is not sparse in general.
+
+	Returns:
+		inv_cov (2D tensor): An inverse covariance (precision) matrix, num_spot x num_spot.
+	"""
+	# check spatial priors
+	valid_priors = ['sma', 'sar', 'isar', 'car', 'icar']
+	if model not in valid_priors:
+		raise ValueError(f"Spatial smoothing prior currently must be one of {valid_priors}")
+
+	weights = weights.clone()
+	num_spot = weights.shape[0] # number of spatial locations
+
+	# make sure weights to be nonnegative for stability
+	weights.values()[:] = weights.values().clamp(min=0)
+
+	# sparse identity matrix
+	sparse_i = torch.sparse_coo_tensor(
+		torch.arange(num_spot).repeat(2,1),
+		torch.ones(num_spot),
+		weights.shape, dtype=torch.float32
+	)
+
+	# calculate inverse covariance matrix according to the weights
+	if model == 'sma': # spatial moving average model
+		if return_sparse:
+			# the inverse covariance matrix of the SMA model is not sparse in general
+			raise NotImplementedError("Sparse inverse covariance matrix is not available for SMA model.")
+
+		# not recommended for large number of spots
+		if num_spot > 10000:
+			warnings.warn(
+				f"Caution: SMA model of {num_spot} spots requires large dense matrix inversion."
+			)
+
+		cov = sparse_i + l * (weights + weights.transpose(0,1)) + \
+			(l**2) * torch.matmul(weights, weights.transpose(0,1)) # covariance matrix
+		try:
+			inv_cov = torch.linalg.inv(cov.to_dense()) # inverse covariance, or precision matrix
+		except RuntimeError:
+			warnings.warn(
+	   			"The covariance matrix is singular, return pseudo inverse instead. "
+		 		"You may want to adjust the smoothing parameter l."
+			)
+			inv_cov = torch.linalg.pinv(cov.to_dense())
+
+	elif model == 'sar': # simultaneous auto-regressive model
+		inv_cov = torch.matmul(sparse_i - l * weights.transpose(0,1),
+							   sparse_i - l * weights)
+
+	elif model == 'isar': # intrinsic simultaneous auto-regressive model
+		# row-scale the weights matrix
+		row_sum = torch.sparse.sum(weights, 1).to_dense()
+		weights.values()[:] = weights.values() / row_sum[weights.indices()[0]]
+
+		inv_cov = torch.matmul(sparse_i - l * weights.transpose(0,1),
+							   sparse_i - l * weights)
+
+	elif model == 'car': # conditional auto-regressive model
+		inv_cov = sparse_i - l * weights
+
+	elif model == 'icar': # intrinsic conditional auto-regressive model
+		row_sum = torch.sparse.sum(weights, 1).to_dense()
+		inv_cov = torch.sparse_coo_tensor(
+			torch.arange(num_spot).repeat(2,1),
+			row_sum,
+			weights.shape, dtype=torch.float32
+		) - l * weights
+
+	if standardize:
+		# not recommended for large number of spots
+		if num_spot > 10000:
+			warnings.warn(
+				"Caution: standardizing the inverse covariance matrix "
+    			f"of {num_spot} spots requires large dense matrix inversion."
+			)
+		inv_cov = _standardize_inv_cov(inv_cov.to_dense()).to_sparse()
+
+	if return_sparse:
+			return inv_cov
+	else:
+		return inv_cov.to_dense()
 
 
 def weight_to_inv_cov(weights, model, l = 1, standardize = False):
@@ -474,8 +785,8 @@ class SpatialWeightMatrix:
 	each pair of spots.
 
 	Attributes:
-		swm (2D tensor): Unscaled spatial weight matrix.
-		swm_scaled (2D tensor): Spatial weight matrix scaled with external information
+		swm (sparse tensor): Unscaled spatial weight matrix.
+		swm_scaled (sparse tensor): Spatial weight matrix scaled with external information
   			(e.g., expression, histology).
 		inv_covs (dict): Cached inverse covariance matrices under different model settings
   			(for debugging).
@@ -490,6 +801,18 @@ class SpatialWeightMatrix:
 		# configurations
 		self.config = defaultdict(lambda: None)
 
+	def _check_swm_stats(self, scaled = False) -> None:
+		"""Check spatial weight matrix statistics."""
+		if scaled and self.swm_scaled is not None:
+			m = self.swm_scaled
+		elif self.swm is not None:
+			m = self.swm
+		else:
+			raise ValueError("Spatial weight matrix is not initialized.")
+
+		print(f"Number of spots: {m.shape[0]}. "
+			  f"Average number of neighbors per spot: {m._nnz() / m.shape[0] : .2f}.")
+
 	def calc_weights_knn(self, coords, k = 6, symmetric = True, row_scale = False) -> None:
 		"""Calculate spatial weight matrix using k-nearest neighbours.
 
@@ -502,14 +825,19 @@ class SpatialWeightMatrix:
 			symmetric (bool): If True only keep mutual neighbors.
 			row_scale (bool): If True scale row sum of the spatial weight matrix to 1.
 		"""
-		self.swm = coordinate_to_weights_knn(coords, k = k, symmetric = symmetric, row_scale = row_scale)
+		# calculate spatial weight matrix and store as a sparse tensor
+		self.swm = coordinate_to_weights_knn_fast(coords, k = k, symmetric = symmetric, row_scale = row_scale)
 		self.swm_scaled = self.swm.clone().float()
+
+		# print out summary statistics of the spatial weight matrix
+		self._check_swm_stats(scaled=False)
+
 		# store configs
 		self.config['weight'] = {'method':'knn', 'k' : k, 'symmetric' : symmetric,
 						   		 'row_scale' : row_scale}
 
-	def calc_weights_dist(self, coords, scale_coords = True, q_threshold = 0.001, band_width = 0.1,
-						  dist_metric = 'euclidean', row_scale = False) -> None:
+	def calc_weights_dist(self, coords, scale_coords = True, radius_cutoff = 1.0,
+						  band_width = 0.1, dist_metric = 'euclidean', row_scale = True) -> None:
 		"""Calculate spatial weight matrix using distance band.
 
 		Convert spatial coordinate to a spatial weight matrix where non-zero entries represent
@@ -517,18 +845,23 @@ class SpatialWeightMatrix:
 
 		Args:
 			coords (2D array): Spatial coordinates, num_spot x 2 (or 3).
-			q_threshold (float): Distance quantile threshold. Number of nonzero entries in the
-				weight matrix (edges) = num_spot^2 * q_threshold.
+			scale_coords (bool): If True, scale coordinates to [0, 1].
+			radius_cutoff (float): Distance threshold (in the same unit as the coords input).
 			band_width (float): Specify the width of the Gaussian kernel, which is proportional
 				to the inverse rate of weight distance decay.
 			dist_metric (str): Distance metric.
 			row_scale (bool): If True scale row sum of the spatial weight matrix to 1.
 		"""
-		self.swm = coordinate_to_weights_dist(coords, scale_coords, q_threshold, band_width,
-											  dist_metric, row_scale)
+		# calculate spatial weight matrix and store as a sparse tensor
+		self.swm = coordinate_to_weights_dist_fast(
+    		coords, scale_coords, radius_cutoff, band_width, dist_metric, row_scale)
 		self.swm_scaled = self.swm.clone().float()
+
+		# print out summary statistics of the spatial weight matrix
+		self._check_swm_stats(scaled=False)
+
 		# store configs
-		self.config['weight'] = {'method':'dist', 'scale_coords':scale_coords, 'q_threshold':q_threshold,
+		self.config['weight'] = {'method':'dist', 'scale_coords':scale_coords, 'radius_cutoff':radius_cutoff,
 								 'band_width':band_width, 'dist_metric':dist_metric, 'row_scale':row_scale}
 
 	def calc_weights_spagcn(self, coords, image, scale_factors : dict,
@@ -548,7 +881,7 @@ class SpatialWeightMatrix:
 			hist_sim: A 2D tensor containing pairwise histology similarities, num_spot x num_spot.
 		"""
 		self.swm = calc_weights_spagcn(coords, image, scale_factors,
-						 			   histology_axis_scale, band_width)
+						 			   histology_axis_scale, band_width).to_sparse()
 		self.swm_scaled = self.swm.clone().float()
 		# store configs
 		self.config['weight'] = {'method':'SpaGCN',
@@ -564,14 +897,32 @@ class SpatialWeightMatrix:
 			row_scale (bool): If True, scale rowsums of spatial weight matrix to be 1.
 			return_swm (bool): Whether to output the scaled spatial weight matrix.
 		"""
-		self.swm_scaled = torch.mul(self.swm, pairwise_sim).float()
+		# if pairwise_sim is sparse
+		if isinstance(pairwise_sim, torch.sparse.FloatTensor):
+			self.swm_scaled = torch.mul(self.swm, pairwise_sim).float()
+		else:
+			# keep only edges in the spatial weight matrix
+			pairwise_sim_sparse = torch.sparse_coo_tensor(
+				self.swm.indices(),
+				pairwise_sim[self.swm.indices()[0], self.swm.indices()[1]],
+				dtype=torch.float32
+			).coalesce()
+			self.swm_scaled = torch.mul(self.swm, pairwise_sim_sparse).float()
 
-		# set diagonal to 1 for spots with no neighbours
-		id_no_neighbors = torch.sum(self.swm_scaled, 1) == 0
-		self.swm_scaled[id_no_neighbors, id_no_neighbors] = 1
+		# set diagonal to 1 for spots with no neighbors
+		id_no_neighbors = torch.where(torch.sparse.sum(self.swm_scaled, 1).to_dense() == 0)[0]
+		self.swm_scaled = self.swm_scaled + torch.sparse_coo_tensor(
+			id_no_neighbors.repeat(2, 1),
+			torch.ones(len(id_no_neighbors)),
+			self.swm_scaled.shape, dtype=torch.float32
+		).coalesce()
 
 		if row_scale: # scale row to sum to 1
-			self.swm_scaled = self.swm_scaled / self.swm_scaled.sum(1, keepdim=True)
+			row_sum = torch.sparse.sum(self.swm_scaled, 1).to_dense()
+			self.swm_scaled.values()[:] = self.swm_scaled.values() / row_sum[self.swm_scaled.indices()[0]]
+
+		# print out summary statistics of the spatial weight matrix
+		self._check_swm_stats(scaled=True)
 
 		if return_swm:
 			return self.swm_scaled
@@ -585,24 +936,33 @@ class SpatialWeightMatrix:
 			boundary_connectivity (float): Connectivity of spots with different identities.
 				If 0 (default), no interaction across identities.
 		"""
-		is_in_same_group = torch.tensor(spot_ids[:,None] == spot_ids)
-		is_neighbors = self.swm > 0
+		neighbors = self.swm.indices()
+		is_in_same_group = torch.tensor(spot_ids[neighbors[0]] == spot_ids[neighbors[1]])
 
-		self.swm_scaled = self.swm.masked_fill_((~is_in_same_group) & (is_neighbors),
-										  		boundary_connectivity)
+		# remove edges between spots with different identities
+		self.swm_scaled = self.swm.clone().float()
+		self.swm_scaled.values()[~is_in_same_group] = boundary_connectivity
 
-		# set diagonal to 1 for spots with no neighbours
-		id_no_neighbors = torch.sum(self.swm_scaled, 1) == 0
-		self.swm_scaled[id_no_neighbors, id_no_neighbors] = 1
+		# set diagonal to 1 for spots with no neighbors
+		id_no_neighbors = torch.where(torch.sparse.sum(self.swm_scaled, 1).to_dense() == 0)[0]
+		self.swm_scaled = self.swm_scaled + torch.sparse_coo_tensor(
+			id_no_neighbors.repeat(2, 1),
+			torch.ones(len(id_no_neighbors)),
+			self.swm_scaled.shape, dtype=torch.float32
+		).coalesce()
 
 		if row_scale: # scale row to sum to 1
-			self.swm_scaled = self.swm_scaled / self.swm_scaled.sum(1, keepdim=True)
+			row_sum = torch.sparse.sum(self.swm_scaled, 1).to_dense()
+			self.swm_scaled.values()[:] = self.swm_scaled.values() / row_sum[self.swm_scaled.indices()[0]]
+
+		# print out summary statistics of the spatial weight matrix
+		self._check_swm_stats(scaled=True)
 
 		if return_swm:
 			return self.swm_scaled
 
 	def scale_by_expr(self, expr, dist_metric = 'cosine',
-						 reduce = 'pca', dim = 10, row_scale = False) -> None:
+					  reduce = 'pca', dim = 10, row_scale = False) -> None:
 		"""Scale weight matrix using transcriptional similarity.
 
 		Args:
@@ -612,15 +972,17 @@ class SpatialWeightMatrix:
 			dim (int): Number of dimension of the reduced space.
 			row_scale (bool): If True, scale rowsums of spatial weight matrix to be 1.
 		"""
-		pairwise_sim = calc_feature_similarity(expr, dist_metric = dist_metric,
-											   reduce = reduce, dim = dim)
+		pairwise_sim = calc_feature_similarity_sparse(
+    		expr, self.swm.indices(), dist_metric = dist_metric,
+			reduce = reduce, dim = dim, return_sparse = True
+		)
 		self.scale_by_similarity(pairwise_sim, row_scale=row_scale)
 		# store configs
 		self.config['similarity'] = {'source' : 'expression', 'dist_metric' : dist_metric,
 							   		 'reduce' : reduce, 'dim' : dim}
 
 	def scale_by_histology(self, coords, image, scale_factors : dict,
-							  dist_metric = 'euclidean', reduce = 'pca', dim = 10, row_scale = False):
+						   dist_metric = 'euclidean', reduce = 'pca', dim = 10, row_scale = False):
 		"""Calculate pairwise histology similarity between spots.
 
 		Args:
@@ -635,8 +997,10 @@ class SpatialWeightMatrix:
 			dim (int): Number of dimension of the reduced space.
 			row_scale (bool): If True, scale rowsums of spatial weight matrix to be 1.
 		"""
-		pairwise_sim = calc_histology_similarity(coords, image, scale_factors, \
-												 dist_metric, reduce, dim)
+		pairwise_sim = calc_histology_similarity_sparse(
+    		coords, self.swm.indices(), image, scale_factors, \
+			dist_metric, reduce, dim
+		)
 		self.scale_by_similarity(pairwise_sim, row_scale=row_scale)
 		# store configs
 		self.config['similarity'] = {'source' : 'histology',
@@ -644,19 +1008,23 @@ class SpatialWeightMatrix:
 									 'dist_metric' : dist_metric,
 									 'reduce' : reduce, 'dim' : dim}
 
-	def get_inv_cov(self, model, l = 1, cached=True, standardize=False):
+	def get_inv_cov(self, model, l = 1, cached=True, standardize=False, return_sparse=True):
 		"""Calculate or extract cached inverse covariance matrix.
 
 		Args:
 			model (str): The spatial process model, can be one of 'sma','sar', 'car', 'icar'.
 			l (float): Smoothing effect size.
+			return_sparse (bool): If True, return sparse matrix.
 		"""
 		if not cached:
-			return weight_to_inv_cov(self.swm_scaled, model=model, l=l, standardize=standardize)
+			return sparse_weight_to_inv_cov(
+				self.swm_scaled, model=model, l=l, standardize=standardize,
+				return_sparse=return_sparse
+			)
 
-		key = f"{model}_{l}_{'sd' if standardize else 'nsd'}"
+		key = f"{model}_{l}_{'sd' if standardize else 'nsd'}_{'sp' if return_sparse else 'ds'}"
 		if self.inv_covs[key] is None:
-			self.inv_covs[key] = weight_to_inv_cov(
-				self.swm_scaled, model=model, l=l, standardize=standardize)
+			self.inv_covs[key] = sparse_weight_to_inv_cov(
+				self.swm_scaled, model=model, l=l, standardize=standardize, return_sparse=return_sparse)
 
 		return self.inv_covs[key]
