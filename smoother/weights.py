@@ -1,43 +1,13 @@
 """
 Calculate spatial weight matrix from coordinates, histology images, and transcriptomic data
 """
-
 from collections import defaultdict
 import warnings
 import numpy as np
 import torch
-from torch.nn.functional import cosine_similarity, pairwise_distance
 from scipy.spatial import distance
 from sklearn.neighbors import NearestNeighbors
-
-def _normalize_coords(coords, min_zero = True, return_scale = False):
-	"""Re-scale spatial coordinates.
-
-	Args:
-		coords (2D array): Spatial coordinates, num_spot x 2 (or 3).
-		min_zero (bool): If True, set minimum coordinate to 0.
-		return_scale (bool): If True, return the scaling factor.
-	"""
-	if not torch.is_tensor(coords):
-		if not isinstance(coords, np.ndarray):
-			coords = np.array(coords)
-		coords = torch.tensor(coords)
-
-	if min_zero: # set minimum coordinate to 0
-		coords_min, _ = coords.min(dim = 0, keepdim = True)
-		coords_norm = coords - coords_min
-	else:
-		coords_norm = coords.clone()
-
-	# set maximum coordinate to 1 (or -1)
-	scale = coords_norm.abs().max()
-	coords_norm = coords_norm / scale
-
-	# return scaling factor
-	if return_scale:
-		return coords_norm, scale
-
-	return coords_norm
+from smoother.utils import *
 
 def coordinate_to_weights_knn_fast(coords, k = 6, symmetric = True, row_scale = True):
 	"""Calculate spatial weight matrix using k-nearest neighbours (sklearn).
@@ -103,7 +73,7 @@ def coordinate_to_weights_dist_fast(coords, scale_coords = True, radius_cutoff =
 		weights: A sparse 2D tensor containing spatial weights, num_spot x num_spot.
 	"""
 	if scale_coords: # rescale coordinates to [0, 1]
-		coords_norm, coords_scale = _normalize_coords(coords, min_zero=True, return_scale=True)
+		coords_norm, coords_scale = normalize_minmax(coords, min_zero=True, return_scale=True)
 		radius_cutoff = radius_cutoff / coords_scale
 	else:
 		coords_norm = coords.clone()
@@ -149,7 +119,7 @@ def coordinate_to_weights_knn(coords, k = 6, symmetric = True, row_scale = True)
 		weights: A 2D tensor containing spatial weights, num_spot x num_spot.
 	"""
 	# calculate pairwise distances
-	coords_norm = _normalize_coords(coords, min_zero=True)
+	coords_norm = normalize_minmax(coords, min_zero=True)
 	dist = torch.tensor(distance.squareform(distance.pdist(coords_norm, metric='euclidean')))
 
 	# find k-nearest neibours for each location
@@ -196,7 +166,7 @@ def coordinate_to_weights_dist(coords, scale_coords = True, q_threshold = 0.001,
 		weights: A 2D tensor containing spatial weights, num_spot x num_spot.
 	"""
 	if scale_coords: # rescale coordinates to [0, 1]
-		coords_norm = _normalize_coords(coords, min_zero=True)
+		coords_norm = normalize_minmax(coords, min_zero=True)
 	else:
 		coords_norm = coords.clone()
 
@@ -221,252 +191,6 @@ def coordinate_to_weights_dist(coords, scale_coords = True, q_threshold = 0.001,
 		weights = weights / weights.sum(1, keepdim=True)
 
 	return weights
-
-def calc_feature_similarity_sparse(
-    features : torch.Tensor, indices : torch.Tensor,
-    dist_metric = 'cosine', reduce = 'none', dim = 10, return_sparse = False):
-	"""Calculate pairwise feature similarity between spots for a given set of spot pairs.
-
-	Similarity `s` is transformed from distance `d` by
-	1) Cosine similarity: s = (1 - d).clamp(min = 0)
-	2) Others: s = exp(- d^2/(2 * band_width^2)))
-
-	Args:
-		features (2D tensor): Feature matrix, num_feature x num_spot.
-		indices (2D tensor): Pairs of spot indices of which to calculate the similarity, 2 x num_pairs.
-		dist_metric (str): Distance metric.
-		reduce (str): If `PCA`, calculate distance on the reduced PCA space.
-		dim (int): Number of dimension of the reduced space.
-		return_sparse (bool): If True, return the similarity matrix as a sparse tensor.
-
-	Returns:
-		feature_sim: A 2D tensor containing pairwise similarities, num_spot x num_spot.
-	"""
-
-	assert dist_metric in ['cosine', 'cos', 'euclidean', 'eu']
-	assert reduce in ['pca', 'mean', 'none']
-
-	# Dimension reduction
-	if reduce == 'pca':
-		# standardize and remove constant features
-		features_var = features.std(1) # feature level variance
-		features_scaled = (features - features.mean(1, keepdim=True)) / features_var[:, None]
-		features_scaled = features_scaled[features_var > 0,:]
-		# run pca
-		torch.manual_seed(0) # for repeatability, fix the random seed for pca_lowrank
-		_, _, v = torch.pca_lowrank(
-			features_scaled.T, center=False,
-			q = min(dim, features_scaled.shape[0])
-		)
-		features_reduced_T = torch.matmul(features_scaled.T, v)
-	else:
-		features_reduced_T = features.T
-
-	if dist_metric in ['euclidean', 'eu']: # euclidean distance
-    	# scale the maximum value to 1
-		features_reduced_T = _normalize_coords(features_reduced_T, min_zero=False)
-		# calculate pairwise distance of selected pairs
-		features_melt = features_reduced_T[indices] # 2 x num_pairs x dim
-		features_dist = pairwise_distance(features_melt[0], features_melt[1])
-		# convert distance to similarity
-		band_width = 0.1 # fixed band width in the gaussian kernel
-		features_sim_flat = torch.exp(- features_dist.pow(2) / (2 * band_width ** 2))
-	else: # cosine similarity
-		# calculate pairwise distance of selected pairs
-		features_melt = features_reduced_T[indices] # 2 x num_pairs x dim
-		features_sim_flat = cosine_similarity(features_melt[0], features_melt[1]).clamp(min = 0)
-
-	# convert to sparse tensor
-	features_sim = 	torch.sparse_coo_tensor(
-		indices, features_sim_flat,
-		torch.Size([features.shape[1], features.shape[1]]),
-		dtype=torch.float32
-	).coalesce()
-
-	if return_sparse:
-		return features_sim
-	else:
-		return features_sim.to_dense()
-
-
-def calc_feature_similarity(features : torch.Tensor, dist_metric = 'cosine',
-							reduce = 'pca', dim = 10):
-	"""Calculate pairwise feature similarity between spots.
-
-	Similarity `s` is transformed from distance `d` by
-	1) Cosine similarity: s = (1 - d).clamp(min = 0)
-	2) Others: s = exp(- d^2/(2 * band_width^2)))
-
-	Args:
-		features (2D tensor): Feature matrix, num_feature x num_spot.
-		dist_metric (str): Distance metric.
-		reduce (str): If `PCA`, calculate distance on the reduced PCA space.
-		dim (int): Number of dimension of the reduced space.
-
-	Returns:
-		feature_sim: A 2D tensor containing pairwise similarities, num_spot x num_spot.
-	"""
-	assert reduce in ['pca', 'mean', 'none']
-
-	# Dimension reduction
-	if reduce == 'pca':
-		# standardize and remove constant features
-		features_var = features.std(1) # feature level variance
-		features_scaled = (features - features.mean(1, keepdim=True)) / features_var[:, None]
-		features_scaled = features_scaled[features_var > 0,:]
-		# run pca
-		torch.manual_seed(0) # for repeatability, fix the random seed for pca_lowrank
-		_, _, v = torch.pca_lowrank(
-			features_scaled.T, center=False,
-			q = min(dim, features_scaled.shape[0])
-		)
-		features_reduced_T = torch.matmul(features_scaled.T, v)
-	else:
-		features_reduced_T = features.T
-
-	if dist_metric in ['euclidean', 'eu']: # scale the maximum to 1
-		features_reduced_T = _normalize_coords(features_reduced_T, min_zero=False)
-
-	# calculate pairwise distances and similarities
-	features_dist = torch.tensor(distance.squareform(
-		distance.pdist(features_reduced_T, metric=dist_metric)))
-
-	if dist_metric in ['cosine', 'cos']:
-		features_sim = (1 - features_dist).clamp(min = 0)
-	else:
-		band_width = 0.1 # fixed band width in the gaussian kernel
-		features_sim = torch.exp(- features_dist.pow(2) / (2 * band_width ** 2))
-		# features_sim = features_sim.fill_diagonal_(0)
-		# # scale the largest similarity per row to 1
-		# row_sf, _ = features_sim.max(1, keepdim=True)
-		# features_sim = features_sim / row_sf
-
-	return features_sim
-
-
-def get_histology_vector(image, x_pixel, y_pixel, spot_radius, scale_factor, padding = True):
-	"""Get the histology image vector of one spot.
-
-	Args:
-		image (3D array): Histology image, num_pixel x num_pixel x num_channel.
-		x_pixel (float): Spot centric position (in fullres).
-		y_pixel (float): Spot centric position (in fullres).
-		spot_radius (float): Spot size (in fullres).
-		scale_factor (float): Scale factor that transforms fullres image to the given image.
-		paddings (bool): Whether to pad for boundary spots.
-			If False, will return the averaged color vector.
-
-	Returns:
-		spot_vec (1D array): A vector containing histology information around the spot.
-	"""
-	# scale pixels and radius
-	x_pixel, y_pixel = x_pixel * scale_factor, y_pixel * scale_factor
-	spot_radius = int(spot_radius * scale_factor)
-
-	# calculate spot region
-	x_min = max(0, int(x_pixel - spot_radius))
-	y_min = max(0, int(y_pixel - spot_radius))
-	x_max = min(image.shape[0], int(x_pixel + spot_radius))
-	y_max = min(image.shape[1], int(y_pixel + spot_radius))
-
-	# extract image for the region
-	spot_vec = image[x_min:x_max, y_min:y_max, :]
-
-	if padding: # calculate padding
-		x_before = spot_radius - int(x_pixel) + x_min
-		y_before = spot_radius - int(y_pixel) + y_min
-		x_after = spot_radius - x_max + int(x_pixel)
-		y_after = spot_radius - y_max + int(y_pixel)
-
-		# apply padding and concatenate all surrounding locations
-		spot_vec = np.pad(spot_vec, pad_width=((x_before, x_after), (y_before, y_after), (0, 0)),
-						  mode='mean').reshape(-1)
-	else:
-		spot_vec = spot_vec.mean(axis = (0,1))
-
-	return spot_vec
-
-def calc_histology_similarity_sparse(
-    	coords, indices, image, scale_factors,
-		dist_metric = 'euclidean', reduce = 'none', dim = 3):
-	"""Calculate pairwise histology similarity between spots for a given set of points.
-
-	Args:
-		coords (2D array): Spatial coordinate matrix (in fullres pixel), num_spot x 2.
-		indices (2D tensor): Pairs of spot indices of which to calculate the similarity, 2 x num_pairs.
-		image (3D array): Histology image, num_pixel x num_pixel x num_channel.
-		scale_fators (dict): The JSON dictionary from 10x Visium's `scalefactors_json.json`
-			'spot_diameter_fullres' (float): Spot size (fullres)
-			'tissue_hires_scalef' (float): Scale factor that transforms fullres image to the given image.
-		reduce (str): How to compute histological similarity. Can be one of 'pca', 'mean', and 'none'.
-			If 'none', will concatenate pixel-level histology vectors of each spot and calculate distance.
-			If 'pca', will concatenate pixel-level histology vectors of each spot, apply PCA to reduce
-				the dimension of the histology space, then calculate the distance.
-			If 'mean', will average the histology vector of each spot over its covering area.
-		dim (int): Number of dimension of the reduced space.
-
-	Returns:
-		hist_sim: A 2D tensor containing pairwise histology similarities, num_spot x num_spot.
-	"""
-	spot_radius = scale_factors['spot_diameter_fullres']/2
-	scale_factor = scale_factors['tissue_hires_scalef']
-
-	assert reduce in ['pca', 'mean', 'none']
-
-	# extract histology vectors per location
-	padding = (reduce != 'mean')
-	hist_vec = np.apply_along_axis(lambda arr: \
-		get_histology_vector(image, arr[0], arr[1], spot_radius, scale_factor, padding), 1, coords)
-
-	# num_hist_feature x num_spot
-	hist_vec = torch.tensor(hist_vec).T
-
-	# calculate similarity
-	hist_sim = calc_feature_similarity_sparse(
-    	hist_vec, indices, dist_metric = dist_metric,
-		reduce = reduce, dim = dim, return_sparse=True
-	)
-
-	return hist_sim
-
-def calc_histology_similarity(coords, image, scale_factors,
-							  dist_metric = 'euclidean', reduce = 'pca', dim = 3):
-	"""Calculate pairwise histology similarity between spots.
-
-	Args:
-		coords (2D array): Spatial coordinate matrix (in fullres pixel), num_spot x 2.
-		image (3D array): Histology image, num_pixel x num_pixel x num_channel.
-		scale_fators (dict): The JSON dictionary from 10x Visium's `scalefactors_json.json`
-			'spot_diameter_fullres' (float): Spot size (fullres)
-			'tissue_hires_scalef' (float): Scale factor that transforms fullres image to the given image.
-		reduce (str): How to compute histological similarity. Can be one of 'pca', 'mean', and 'none'.
-			If 'none', will concatenate pixel-level histology vectors of each spot and calculate distance.
-			If 'pca', will concatenate pixel-level histology vectors of each spot, apply PCA to reduce
-				the dimension of the histology space, then calculate the distance.
-			If 'mean', will average the histology vector of each spot over its covering area.
-		dim (int): Number of dimension of the reduced space.
-
-	Returns:
-		hist_sim: A 2D tensor containing pairwise histology similarities, num_spot x num_spot.
-	"""
-	spot_radius = scale_factors['spot_diameter_fullres']/2
-	scale_factor = scale_factors['tissue_hires_scalef']
-
-	assert reduce in ['pca', 'mean', 'none']
-
-	# extract histology vectors per location
-	padding = (reduce != 'mean')
-	hist_vec = np.apply_along_axis(lambda arr: \
-		get_histology_vector(image, arr[0], arr[1], spot_radius, scale_factor, padding), 1, coords)
-
-	# num_hist_feature x num_spot
-	hist_vec = torch.tensor(hist_vec).T
-
-	# calculate similarity
-	hist_sim = calc_feature_similarity(hist_vec, dist_metric = dist_metric,
-									   reduce = reduce, dim = dim)
-
-	return hist_sim
 
 
 def calc_weights_spagcn(coords, image, scale_factors,
@@ -974,7 +698,7 @@ class SpatialWeightMatrix:
 		"""
 		pairwise_sim = calc_feature_similarity_sparse(
     		expr, self.swm.indices(), dist_metric = dist_metric,
-			reduce = reduce, dim = dim, return_sparse = True
+			reduce = reduce, dim = dim, nonneg=True, return_type = 'sparse'
 		)
 		self.scale_by_similarity(pairwise_sim, row_scale=row_scale)
 		# store configs

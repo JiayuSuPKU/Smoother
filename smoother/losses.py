@@ -8,7 +8,7 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.spatial import distance
+from smoother.utils import get_neighbor_quantile_value_by_k
 
 # optional imports for the topological loss
 try:
@@ -19,7 +19,7 @@ except ImportError:
 				  category=ImportWarning)
 	LevelSetLayer2D, PartialSumBarcodeLengths = None, None
 
-from smoother.weights import SpatialWeightMatrix, _normalize_coords
+from smoother.weights import SpatialWeightMatrix, normalize_minmax
 
 def kl_loss_scipy(p, weights = None):
 	"""Calculate KL divergence using scipy.
@@ -167,7 +167,7 @@ class SpatialLoss(nn.Module):
 				# self.inv_cov: 1 x n_spot x n_spot
 				self.inv_cov = self.spatial_weights.get_inv_cov(
 					self.prior, scale_weights, cached=False,
-    				standardize=self.standardize_cov,
+					standardize=self.standardize_cov,
 					return_sparse=use_sparse
 				).unsqueeze(0)
 				self.confidences = torch.ones(1) # group-specific variance
@@ -178,7 +178,7 @@ class SpatialLoss(nn.Module):
 						self.prior, self.scale_weights, cached=False,
 						standardize=self.standardize_cov,
 						return_sparse=use_sparse)
-    				for swm in self.spatial_weights], dim=0)
+					for swm in self.spatial_weights], dim=0)
 				self.confidences = torch.ones(len(self.spatial_weights)) # group-specific variance
 
 			# concatenate the inverse covariance matrix into a sparse diag matrix for efficient computation
@@ -190,7 +190,7 @@ class SpatialLoss(nn.Module):
 					num_group = self.inv_cov.shape[0]
 					num_spot = self.inv_cov.shape[1]
 					indices = torch.concat(
-        				[self.inv_cov[i].coalesce().indices() + i * num_spot for i in range(num_group)],
+						[self.inv_cov[i].coalesce().indices() + i * num_spot for i in range(num_group)],
 						dim=1
 					)
 					values = torch.concat(
@@ -255,22 +255,20 @@ class SpatialLoss(nn.Module):
 			group_scales=self.confidences, normalize=True
 		)
 
-	def calc_cov_decay(self, coords, max_k = 50, step_k = 1, topk = False, cov_id = 0,
-					   quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]):
-		"""Calculate spatial covariance decay over distance.
+
+	def calc_corr_decay_stats(self, coords, min_k = 0, max_k = 50, cov_ind = 0, return_var = False):
+		"""Calculate spatial covariance decay over degree of neighborhoods.
 
 		Covariance measured between k-nearest neighbors. If the number of covariance
-		matrices (i.e. self.inv_cov.shape[0]) is larger than 1, use 'cov_id' to select
+		matrices (i.e. self.inv_cov.shape[0]) is larger than 1, use 'cov_ind' to select
 		the covariance matrix to use.
 
 		Args:
 			coords (2D tensor): Coordinates of spots, num_spot x 2.
-			max_k: Maximum number of k in k-nearest neighbors to extract covariance.
-			step_k: Step size of k.
-			topk: Whether to use top-k neighbors. If True, for each k, the covariance
-				distribution represents all j-th nearest neighbors where j <= k.
-			cov_id (int): Index of the covariance matrix to use.
-			quantiles: Quantiles of covariance distribution to report.
+			min_k: Minimum number of k in k-nearest neighbors. k = 0: self.
+			max_k: Maximum number of k in k-nearest neighbors.
+			cov_ind (int): Index of the covariance matrix to use.
+			return_var (bool): Whether to return variance stats.
 
 		Returns:
 			corr_decay_quantiles_df (pd.DataFrame): Correlation decay quantiles.
@@ -278,7 +276,9 @@ class SpatialLoss(nn.Module):
 		"""
 		# each element in self.inv_cov specifies a different covariance matrix
 		# if self.inv_cov.shape[0] > 1, use cov_id to select the covariance matrix
-		assert cov_id < self.inv_cov.shape[0] # 1 or n_group
+		assert cov_ind < self.inv_cov.shape[0] # 1 or n_group
+
+		num_spot = coords.shape[0]
 
 		# calculate covariance according to the spatial loss setting
 		if self.prior == 'kl':
@@ -288,14 +288,25 @@ class SpatialLoss(nn.Module):
 			if isinstance(self.spatial_weights, SpatialWeightMatrix):
 				weights = self.spatial_weights.swm_scaled
 			else:
-				weights = self.spatial_weights[cov_id].swm_scaled
+				weights = self.spatial_weights[cov_ind].swm_scaled
 
 			# covariance
-			cov = torch.eye(weights.shape[0]) + self.scale_weights * (weights + weights.T) + \
-				(self.scale_weights ** 2) * torch.matmul(weights, weights.T)
+			cov = torch.sparse_coo_tensor(
+				torch.arange(num_spot).repeat(2,1),
+				torch.ones(num_spot),
+				weights.shape, dtype=torch.float32
+			) + self.scale_weights * (weights + weights.transpose(0,1)) + \
+				(self.scale_weights ** 2) * torch.matmul(weights, weights.transpose(0,1))
+			cov = cov.to_dense()
+
 		else:
+			if num_spot > 10000:
+				warnings.warn(
+					f"Caution: The covariance of {num_spot} spots requires large dense matrix inversion."
+				)
+
 			try:
-				cov = torch.cholesky_inverse(torch.linalg.cholesky(self.inv_cov[cov_id]))
+				cov = torch.cholesky_inverse(torch.linalg.cholesky(self.inv_cov[cov_ind].to_dense()))
 			except RuntimeError as exc:
 				raise RuntimeError(f"The current loss ({self.prior}, l={self.scale_weights}) "
 									"contains an improper spatial covariance structure. "
@@ -307,42 +318,16 @@ class SpatialLoss(nn.Module):
 		inv_sd = torch.diagflat(var ** -0.5)
 		corr = inv_sd @ cov @ inv_sd
 
-		# calculate pairwise distances
-		coords_norm = _normalize_coords(coords, min_zero=True)
-		dist = torch.tensor(distance.squareform(distance.pdist(coords_norm, metric='euclidean')))
-
 		# calculate correlation decay
-		corr_decay_k = []
-		for k in range(1, max_k + 1, step_k):
-			# calculate binary matrix indexing k-nearest neighbors
-			if topk:
-				_, knn_id = torch.topk(dist, k = k, dim = 1, largest = False)
-			else:
-				_, knn_id = torch.kthvalue(dist, k, dim = 1)
-				knn_id = knn_id[:,None]
+		corr_decay_quantiles_df = get_neighbor_quantile_value_by_k(corr, coords, min_k, max_k)
 
-			knn_index = torch.zeros(dist.shape[0], dist.shape[0])
-			knn_index = knn_index.scatter_(1, knn_id, 1)
-
-			# extract pairwise correlations and calculate quantiles
-			corr_vec = (corr * knn_index)[knn_index != 0]
-
-			corr_decay_k.append(
-				torch.nanquantile(
-					corr_vec, torch.tensor(quantiles)
-				)
-			)
+		if not return_var:
+			return corr_decay_quantiles_df
 
 		# calculate variance quantile distribution
-		var_quantiles = torch.nanquantile(var, torch.tensor(quantiles))
-
-		# convert to dataframe
-		quantile_names = [f'Q{str(int(q * 100))}' for q in quantiles]
-		corr_decay_quantiles_df = pd.DataFrame(torch.stack(corr_decay_k, dim=0).numpy(),
-											   columns=quantile_names)
-		corr_decay_quantiles_df['k'] = range(1, max_k + 1, step_k)
-		var_quantiles_df = pd.DataFrame(var_quantiles.numpy().reshape(1,-1),
-										columns=quantile_names)
+		q = torch.tensor([0.1, 0.25, 0.5, 0.75, 0.9])
+		var_quantiles = torch.nanquantile(var, q).numpy().reshape(1,-1)
+		var_quantiles_df = pd.DataFrame(var_quantiles, columns=['Q10', 'Q25', 'Q50', 'Q75', 'Q90'])
 
 		return corr_decay_quantiles_df, var_quantiles_df
 
