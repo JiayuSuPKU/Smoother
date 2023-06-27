@@ -334,7 +334,7 @@ def quantile_feature_similarity_neighbor(features, coords, k, reduce = "pca", di
 	obs_sim_vec = calc_feature_similarity_sparse(
 		features_reduced, edges, dist_metric="cosine",
 		reduce = 'none', nonneg=False, return_type='flat'
-	)
+	).float()
 
 	# calculate background cosine similarity level
 	torch.manual_seed(0)
@@ -351,7 +351,7 @@ def quantile_feature_similarity_neighbor(features, coords, k, reduce = "pca", di
 		)
 		null_sim_list.append(null_sim_vec)
 
-	null_sim_vec = torch.concat(null_sim_list, dim=0)
+	null_sim_vec = torch.concat(null_sim_list, dim=0).float()
 
 	# return quantiles
 	q = torch.arange(0, 1.01, 0.01)
@@ -411,7 +411,7 @@ def quantile_feature_similarity_decay(features, coords, max_k = 50, topk = False
 		cos_sim_k_vec = calc_feature_similarity_sparse(
 			features_reduced, edges_k, dist_metric="cosine",
 			reduce = 'none', return_type='flat'
-		)
+		).float()
 
 		# store quantiles
 		results.append(list(torch.quantile(cos_sim_k_vec, q).numpy()) + [k])
@@ -463,7 +463,7 @@ def plot_similarity_cdf(df_k, title = "", k = None):
 			geom_vline(xintercept = 0.5, linetype = "dashed", color = "gray") +
 			labs(
 			  x = "Quantile",
-			  y = "Cumulative distribution of pairwise cosine similarity\nbetween neighboring spots"
+			  y = "Cumulative density of cosine similarity\nbetween neighboring spots"
 	 			  f"{' (k = ' + str(k) + ')' if k is not None else ''}",
 			  color = "",
 			  title = title

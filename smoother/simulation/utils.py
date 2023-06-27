@@ -186,12 +186,13 @@ def grouped_obs_mean(adata, group_key, layer=None, gene_symbols=None):
 
 	grouped = adata.obs.groupby(group_key)
 	out = pd.DataFrame(
-		np.zeros((len(gene_symbols), len(grouped)), dtype=np.float64),
-		columns=list(grouped.groups.keys()),
-		index=gene_symbols
+		np.zeros((len(feature_idx), len(grouped)), dtype=np.float64),
+		columns=list(grouped.groups.keys())
 	)
 
 	for group, idx in grouped.indices.items():
 		ref_counts = get_x(adata[idx, feature_idx])
 		out[group] = np.ravel(ref_counts.mean(axis=0, dtype=np.float64))
+
+	out.index = feature_idx
 	return out
