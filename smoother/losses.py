@@ -234,7 +234,7 @@ class SpatialLoss(nn.Module):
 		self.confidences = torch.std(solution, dim = 1) / torch.std(solution, dim=1).max()
 
 
-	def forward(self, coefs):
+	def forward(self, coefs, normalize = True):
 		"""Calculate spatial loss.
 
 		Args:
@@ -247,12 +247,12 @@ class SpatialLoss(nn.Module):
 		if self.prior != 'sma' and self.use_sparse: # use sparse matrix
 			return sparse_quadratic_loss(
 				beta = coefs, inv_cov_2d_sp=self.inv_cov_2d_sp,
-				group_scales=self.confidences, normalize=True
+				group_scales=self.confidences, normalize=normalize
 			)
 
 		return quadratic_loss(
 			beta = coefs, inv_cov=self.inv_cov,
-			group_scales=self.confidences, normalize=True
+			group_scales=self.confidences, normalize=normalize
 		)
 
 
@@ -472,16 +472,16 @@ class ContrastiveSpatialLoss(SpatialLoss):
 					)
 					break
 
-	def forward(self, coefs):
+	def forward(self, coefs, normalize = True):
 		"""Calculate contrastive spatial loss."""
 		# positive loss to maximize similarity with true neighbors
-		pos_loss = super().forward(coefs)
+		pos_loss = super().forward(coefs, normalize = normalize)
 
 		# negative loss to minimize similarity with randomly generated neighbors
 		neg_loss = 0
 		for _ in range(self.num_perm): # randomly permute spots
 			idx_perm = torch.randperm(coefs.shape[1])
-			neg_loss += super().forward(coefs[:, idx_perm])
+			neg_loss += super().forward(coefs[:, idx_perm], normalize = normalize)
 		neg_loss /= self.num_perm
 
 		# total contrastive loss clamped to lower bound
