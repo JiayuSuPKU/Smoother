@@ -486,4 +486,11 @@ class ContrastiveSpatialLoss(SpatialLoss):
 
 		# total contrastive loss clamped to lower bound
 		total_loss = pos_loss - self.neg2pos_ratio * neg_loss
-		return torch.clamp(total_loss, min=self.lower_bound)
+
+		# clamp to lower bound
+		if not normalize:
+			lower_bound = self.lower_bound * coefs.shape[0] * coefs.shape[1]
+		else:
+			lower_bound = self.lower_bound
+
+		return torch.clamp(total_loss, min=lower_bound)

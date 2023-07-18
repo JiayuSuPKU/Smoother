@@ -2,6 +2,8 @@ from typing import List, Literal, Optional, Union
 from copy import deepcopy
 from timeit import default_timer as timer
 import warnings
+
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -60,7 +62,10 @@ class AutoEncoderClass(nn.Module):
 		if layer is None:
 			self._data = torch.tensor(adata.X.toarray().T) # n_feature x n_sample
 		else:
-			self._data = torch.tensor(adata.layers[layer].toarray().T) # n_feature x n_sample
+			data = adata.layers[layer]
+			if not isinstance(data, np.ndarray):
+				data = data.toarray()
+			self._data = torch.tensor(data.T) # n_feature x n_sample
 
 	def forward(self, x):
 		return self.decode(self.encode(x))

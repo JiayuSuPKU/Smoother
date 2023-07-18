@@ -1,5 +1,6 @@
 from typing import List, Literal, Optional, Union
 from copy import deepcopy
+from timeit import default_timer as timer
 import warnings
 import inspect
 
@@ -31,7 +32,7 @@ class SPVAE(VAE):
 		self,
 		n_input: int,
 		spatial_loss: Optional[SpatialLoss] = None,
-		lambda_spatial_loss = 1.0,
+		lambda_spatial_loss = 0.1,
 		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z',
 		n_hidden: int = 128,
 		n_latent: int = 10,
@@ -96,7 +97,7 @@ class SPVAE(VAE):
 			else:
 				raise NotImplementedError('Currently the spatial loss can only be applied on z or mean_z.')
 
-			sp_loss *= self.l_sp_loss
+			sp_loss *= self.l_sp_loss / self.n_latent
 		else:
 			sp_loss = torch.tensor(0.0)
 
@@ -122,12 +123,12 @@ class SpatialVAE(SCVI):
 		self,
 		st_adata: AnnData,
 		spatial_loss: Optional[SpatialLoss] = None,
-		lambda_spatial_loss = 1.0,
+		lambda_spatial_loss = 0.1,
 		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z',
 		n_hidden: int = 128,
 		n_latent: int = 10,
 		n_layers: int = 1,
-		dropout_rate: float = 0.1,
+		dropout_rate: float = 0.0,
 		dispersion: Literal["gene", "gene-batch", "gene-label", "gene-cell"] = "gene",
 		gene_likelihood: Literal["zinb", "nb", "poisson"] = "nb",
 		latent_distribution: Literal["normal", "ln"] = "normal",
@@ -136,7 +137,7 @@ class SpatialVAE(SCVI):
 		super().__init__(st_adata)
 		self.n_genes = self.summary_stats.n_vars
 
-		self.module = SPVAE(
+		self.module = self._module_cls(
 			n_input=self.n_genes,
 			spatial_loss=spatial_loss,
 			lambda_spatial_loss=lambda_spatial_loss,
@@ -150,8 +151,10 @@ class SpatialVAE(SCVI):
 			latent_distribution=latent_distribution,
 			**model_kwargs,
 		)
-		self._model_summary_string = f"SPVAE Model with n_genes: {self.n_genes}"
+		self._model_summary_string = self._model_summary_string.replace('SCVI', 'SpatialVAE')
 		self.init_params_ = self._get_init_params(locals())
+		self.dr_logs = {'elapsed_time': None, 'total_loss': [],
+						'recon_loss': [], 'spatial_loss': []}
 
 	@devices_dsp.dedent
 	def train(
@@ -174,6 +177,8 @@ class SpatialVAE(SCVI):
 		else:
 			plan_kwargs = update_dict
 
+		t_start = timer()
+
 		# fit the model with all spots (no mini-batch)
 		super().train(
 			max_epochs=max_epochs,
@@ -187,6 +192,12 @@ class SpatialVAE(SCVI):
 			plan_kwargs=plan_kwargs,
 			**kwargs,
 		)
+		t_end = timer()
+		self.dr_logs['elapsed_time'] = t_end - t_start
+		self.dr_logs['total_loss'] = self.trainer.logger.history['elbo_train']
+		self.dr_logs['recon_loss'] = self.trainer.logger.history['reconstruction_loss_train']
+		self.dr_logs['spatial_loss'] = self.trainer.logger.history['kl_global_train']
+
 
 	@classmethod
 	def from_rna_model(
@@ -194,7 +205,7 @@ class SpatialVAE(SCVI):
 		st_adata: AnnData,
 		sc_model: SCVI,
 		spatial_loss: Optional[SpatialLoss] = None,
-		lambda_spatial_loss = 1.0,
+		lambda_spatial_loss = 0.1,
 		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z',
 		**spvae_kwargs,
 	):
@@ -216,7 +227,6 @@ class SpatialVAE(SCVI):
 		non_kwargs = deepcopy(init_params["non_kwargs"])
 		kwargs = deepcopy(init_params["kwargs"])
 		kwargs = {k: v for (i, j) in kwargs.items() for (k, v) in j.items()}
-		valid_model_args = inspect.getfullargspec(cls.__init__).args
 		for k, v in list({**non_kwargs, **kwargs}.items()):
 			if k in spvae_kwargs.keys():
 				warnings.warn(
@@ -226,18 +236,18 @@ class SpatialVAE(SCVI):
 				)
 				del spvae_kwargs[k]
 
-   			# remove the parameters that are not valid for the new model
-			if k not in valid_model_args:
-				warnings.warn(
-					f"Argument '{k}' in the pretrained model is not valid for {cls.__name__}."
-					" Will be ignored.",
-					UserWarning
-				)
-				try:
-					del non_kwargs[k]
-				except KeyError:
-					del kwargs[k]
-
+		# overwrite the spatial loss parameters with the new ones
+		if 'spatial_loss' in non_kwargs.keys():
+			warnings.warn(
+				"Overwriting the spatial_loss parameter of the pretrained model. "
+				f"'spatial_loss': {non_kwargs['spatial_loss']} -> {spatial_loss}. "
+				f"'lambda_spatial_loss': {non_kwargs['lambda_spatial_loss']} -> {lambda_spatial_loss}. "
+				f"'sp_loss_on': {non_kwargs['sp_loss_on']} -> {sp_loss_on}.",
+				UserWarning
+			)
+			del non_kwargs['spatial_loss']
+			del non_kwargs['lambda_spatial_loss']
+			del non_kwargs['sp_loss_on']
 
 		# set up the anndata object
 		scvi_setup_args = deepcopy(sc_model.adata_manager.registry[_SETUP_ARGS_KEY])
