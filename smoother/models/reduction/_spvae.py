@@ -17,6 +17,7 @@ from scvi.utils._docstrings import devices_dsp
 from scvi.data._constants import _SETUP_ARGS_KEY
 
 from smoother import SpatialLoss
+from ._utils import set_params_online_update
 
 class SPVAE(VAE):
 	"""Add spatial loss to the latent representation in the VAE model.
@@ -111,6 +112,26 @@ class SPVAE(VAE):
 			loss=loss, reconstruction_loss=reconst_loss, kl_local=kl_local, kl_global=sp_loss
 		)
 
+	@classmethod
+	def from_vae(
+		cls,
+		vae_module: VAE,
+		spatial_loss: Optional[SpatialLoss] = None,
+		lambda_spatial_loss = 0.1,
+		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z'
+	):
+
+		# copy the VAE module
+		spvae = deepcopy(vae_module)
+
+		# switch to the spatial module
+		spvae.__class__ = cls
+		spvae.spatial_loss = spatial_loss
+		spvae.l_sp_loss = lambda_spatial_loss
+		spvae.sp_loss_on = sp_loss_on
+
+		return spvae
+
 
 class SpatialVAE(SCVI):
 	"""Spatially-aware Variational Autoencoder model.
@@ -134,14 +155,8 @@ class SpatialVAE(SCVI):
 		latent_distribution: Literal["normal", "ln"] = "normal",
 		**model_kwargs,
 	):
-		super().__init__(st_adata)
-		self.n_genes = self.summary_stats.n_vars
-
-		self.module = self._module_cls(
-			n_input=self.n_genes,
-			spatial_loss=spatial_loss,
-			lambda_spatial_loss=lambda_spatial_loss,
-			sp_loss_on=sp_loss_on,
+		super().__init__(
+			st_adata,
 			n_hidden=n_hidden,
 			n_latent=n_latent,
 			n_layers=n_layers,
@@ -151,6 +166,14 @@ class SpatialVAE(SCVI):
 			latent_distribution=latent_distribution,
 			**model_kwargs,
 		)
+
+		self.module = self._module_cls.from_vae(
+			self.module,
+			spatial_loss=spatial_loss,
+			lambda_spatial_loss=lambda_spatial_loss,
+			sp_loss_on=sp_loss_on
+		)
+
 		self._model_summary_string = self._model_summary_string.replace('SCVI', 'SpatialVAE')
 		self.init_params_ = self._get_init_params(locals())
 		self.dr_logs = {'elapsed_time': None, 'total_loss': [],
@@ -207,6 +230,13 @@ class SpatialVAE(SCVI):
 		spatial_loss: Optional[SpatialLoss] = None,
 		lambda_spatial_loss = 0.1,
 		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z',
+		unfrozen: bool = False,
+		freeze_dropout: bool = False,
+		freeze_expression: bool = True,
+		freeze_decoder_first_layer: bool = True,
+		freeze_batchnorm_encoder: bool = True,
+		freeze_batchnorm_decoder: bool = False,
+		freeze_classifier: bool = True,
 		**spvae_kwargs,
 	):
 		"""Alternate constructor for exploiting a pre-trained model on RNA-seq data.
@@ -250,7 +280,8 @@ class SpatialVAE(SCVI):
 			del non_kwargs['sp_loss_on']
 
 		# set up the anndata object
-		scvi_setup_args = deepcopy(sc_model.adata_manager.registry[_SETUP_ARGS_KEY])
+		registry = deepcopy(sc_model.adata_manager.registry)
+		scvi_setup_args = registry[_SETUP_ARGS_KEY]
 		valid_setup_args = inspect.getfullargspec(cls.setup_anndata).args
 		for k in list(scvi_setup_args.keys()):
 			if k not in valid_setup_args:
@@ -261,14 +292,19 @@ class SpatialVAE(SCVI):
 				)
 				del scvi_setup_args[k]
 
+		# prepare the query anndata
+		st_adata_prep = SCVI.prepare_query_anndata(st_adata, sc_model, inplace=False)
 		cls.setup_anndata(
-			st_adata,
-			**scvi_setup_args
+			st_adata_prep,
+			source_registry=registry,
+			extend_categories=True,
+			allow_missing_labels=True,
+			**scvi_setup_args,
 		)
 
-		# initialize the new instance
+		# initialize the new model
 		sp_model = cls(
-			st_adata,
+			st_adata_prep,
 			spatial_loss=spatial_loss,
 			lambda_spatial_loss=lambda_spatial_loss,
 			sp_loss_on=sp_loss_on,
@@ -276,9 +312,34 @@ class SpatialVAE(SCVI):
 		)
 
 		# copy the encoder and decoder state dict
-		scvi_state_dict = sc_model.module.state_dict()
-		sp_model.module.load_state_dict(scvi_state_dict, strict=False)
+		sc_state_dict = sc_model.module.state_dict()
+
+		# model tweaking
+		new_state_dict = sp_model.module.state_dict()
+		for key, load_ten in sc_state_dict.items():
+			new_ten = new_state_dict[key]
+			if new_ten.size() == load_ten.size():
+				continue
+			# new categoricals changed size, need to pad the pretrained load_ten
+			else:
+				dim_diff = new_ten.size()[-1] - load_ten.size()[-1]
+				fixed_ten = torch.cat([load_ten, new_ten[..., -dim_diff:]], dim=-1)
+				sc_state_dict[key] = fixed_ten
+
+		sp_model.module.load_state_dict(sc_state_dict)
+		sp_model.module.eval()
+
+		# freeze the pretrained model if neccessary
+		set_params_online_update(
+			sp_model.module,
+			unfrozen=unfrozen,
+			freeze_decoder_first_layer=freeze_decoder_first_layer,
+			freeze_batchnorm_encoder=freeze_batchnorm_encoder,
+			freeze_batchnorm_decoder=freeze_batchnorm_decoder,
+			freeze_dropout=freeze_dropout,
+			freeze_expression=freeze_expression,
+			freeze_classifier=freeze_classifier,
+		)
+		sp_model.is_trained_ = False
 
 		return sp_model
-
-

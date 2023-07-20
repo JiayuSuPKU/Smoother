@@ -2,6 +2,7 @@
 Calculate spatial weight matrix from coordinates, histology images, and transcriptomic data
 """
 from collections import defaultdict
+from functools import partial
 import warnings
 import numpy as np
 import torch
@@ -521,9 +522,9 @@ class SpatialWeightMatrix:
 		self.swm = None
 		self.swm_scaled = None
 		# cached spatial covariance matrix
-		self.inv_covs = defaultdict(lambda: None)
+		self.inv_covs = defaultdict(partial(defaultdict, None))
 		# configurations
-		self.config = defaultdict(lambda: None)
+		self.config = defaultdict(partial(defaultdict, None))
 
 	def _check_swm_stats(self, scaled = False) -> None:
 		"""Check spatial weight matrix statistics."""
