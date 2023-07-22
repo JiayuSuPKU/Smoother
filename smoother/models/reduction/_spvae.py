@@ -202,6 +202,13 @@ class SpatialVAE(SCVI):
 
 		t_start = timer()
 
+		if kwargs.get('early_stopping', False):
+			# TODO: implement early stopping
+			# Currently even if "early_stopping_monitor" is on training data
+			# 'check_val_every_n_epoch' will still be set to one
+			# in the Trainer class (scvi.train._train.Trainer L129)
+			raise ValueError('Early stopping is not supported for SpatialVAE as there is no validation set.')
+
 		# fit the model with all spots (no mini-batch)
 		super().train(
 			max_epochs=max_epochs,

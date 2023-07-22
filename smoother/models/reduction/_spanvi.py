@@ -8,98 +8,23 @@ import torch
 from torch.distributions import kl_divergence as kl
 from torch.distributions import Categorical, Normal
 
-from scvi import REGISTRY_KEYS, settings
-from scvi.nn import one_hot
+from scvi import REGISTRY_KEYS
 from scvi.autotune._types import Tunable
 from scvi.module.base import LossOutput
 from scvi.module import SCANVAE
 from scvi.model import SCVI, SCANVI
 from scvi.train import TrainRunner, TrainingPlan
+from scvi.data._constants import _SETUP_ARGS_KEY
 
 from anndata import AnnData
 from scvi.dataloaders import DeviceBackedDataSplitter
 from scvi.utils._docstrings import devices_dsp
 
 from smoother import SpatialLoss
+from ._utils import broadcast_labels, get_max_epochs_heuristic, set_params_online_update
+
 
 logger = logging.getLogger(__name__)
-
-# SCVI.module.base._utils.py
-def iterate(obj, func):
-	"""Iterates over an object and applies a function to each element."""
-	t = type(obj)
-	if t is list or t is tuple:
-		return t([iterate(o, func) for o in obj])
-	else:
-		return func(obj) if obj is not None else None
-
-def broadcast_labels(y, *o, n_broadcast=-1):
-	"""Utility for the semi-supervised setting.
-
-	If y is defined(labelled batch) then one-hot encode the labels (no broadcasting needed)
-	If y is undefined (unlabelled batch) then generate all possible labels (and broadcast other arguments if not None)
-	"""
-	if not len(o):
-		raise ValueError("Broadcast must have at least one reference argument")
-	if y is None:
-		ys = enumerate_discrete(o[0], n_broadcast)
-		new_o = iterate(
-			o,
-			lambda x: x.repeat(n_broadcast, 1)
-			if len(x.size()) == 2
-			else x.repeat(n_broadcast),
-		)
-	else:
-		ys = one_hot(y, n_broadcast)
-		new_o = o
-	return (ys,) + new_o
-
-def enumerate_discrete(x, y_dim):
-	"""Enumerate discrete variables."""
-
-	def batch(batch_size, label):
-		labels = torch.ones(batch_size, 1, device=x.device, dtype=torch.long) * label
-		return one_hot(labels, y_dim)
-
-	batch_size = x.size(0)
-	return torch.cat([batch(batch_size, i) for i in range(y_dim)])
-
-def get_max_epochs_heuristic(
-	n_obs: int, epochs_cap: int = 400, decay_at_n_obs: int = 20000
-) -> int:
-	"""Compute a heuristic for the default number of maximum epochs.
-
-	If `n_obs <= decay_at_n_obs`, the number of maximum epochs is set to
-	`epochs_cap`. Otherwise, the number of maximum epochs decays according to
-	`(decay_at_n_obs / n_obs) * epochs_cap`, with a minimum of 1.
-
-	Parameters
-	----------
-	n_obs
-		The number of observations in the dataset.
-	epochs_cap
-		The maximum number of epochs for the heuristic.
-	decay_at_n_obs
-		The number of observations at which the heuristic starts decaying.
-
-	Returns
-	-------
-	`int`
-		A heuristic for the default number of maximum epochs.
-	"""
-	max_epochs = min(round((decay_at_n_obs / n_obs) * epochs_cap), epochs_cap)
-	max_epochs = max(max_epochs, 1)
-
-	if max_epochs == 1:
-		warnings.warn(
-			"The default number of maximum epochs has been set to 1 due to the large"
-			"number of observations. Pass in `max_epochs` to the `train` function in "
-			"order to override this behavior.",
-			UserWarning,
-			stacklevel=settings.warnings_stacklevel,
-		)
-
-	return max_epochs
 
 
 class SPANVAE(SCANVAE):
@@ -302,6 +227,27 @@ class SPANVAE(SCANVAE):
 			kl_global=sp_loss,
 		)
 
+	@classmethod
+	def from_vae(
+		cls,
+		vae_module: SCANVAE,
+		spatial_loss: Optional[SpatialLoss] = None,
+		lambda_spatial_loss = 0.1,
+		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z'
+	):
+
+		# copy the VAE module
+		spanvae = deepcopy(vae_module)
+
+		# switch to the spatial module
+		spanvae.__class__ = cls
+		spanvae.spatial_loss = spatial_loss
+		spanvae.l_sp_loss = lambda_spatial_loss
+		spanvae.sp_loss_on = sp_loss_on
+
+		return spanvae
+
+
 
 class SpatialANVI(SCANVI):
 	"""Spatially-aware ANnotation Variational Inference model.
@@ -327,14 +273,8 @@ class SpatialANVI(SCANVI):
 		latent_distribution: Literal["normal", "ln"] = "normal",
 		**model_kwargs,
 	):
-		super().__init__(st_adata)
-		self.n_genes = self.summary_stats.n_vars
-
-		self.module = SpatialANVI._module_cls(
-			n_input=self.n_genes,
-			spatial_loss=spatial_loss,
-			lambda_spatial_loss=lambda_spatial_loss,
-			sp_loss_on=sp_loss_on,
+		super().__init__(
+			st_adata,
 			n_hidden=n_hidden,
 			n_latent=n_latent,
 			n_layers=n_layers,
@@ -342,10 +282,22 @@ class SpatialANVI(SCANVI):
 			dispersion=dispersion,
 			gene_likelihood=gene_likelihood,
 			latent_distribution=latent_distribution,
-			**model_kwargs,
+			**model_kwargs
 		)
+
+		self.module = self._module_cls.from_vae(
+			self.module,
+			spatial_loss=spatial_loss,
+			lambda_spatial_loss=lambda_spatial_loss,
+			sp_loss_on=sp_loss_on
+		)
+
 		self._model_summary_string = self._model_summary_string.replace('ScanVI', 'SpatialANVI')
 		self.init_params_ = self._get_init_params(locals())
+		self.dr_logs = {'elapsed_time': None, 'total_loss': [],
+						'recon_loss': [], 'spatial_loss': []}
+
+
 
 	@devices_dsp.dedent
 	def train(
@@ -405,6 +357,13 @@ class SpatialANVI(SCANVI):
 		spatial_loss: Optional[SpatialLoss] = None,
 		lambda_spatial_loss = 0.1,
 		sp_loss_on: Literal['z', 'mean_z'] = 'mean_z',
+		unfrozen: bool = False,
+		freeze_dropout: bool = False,
+		freeze_expression: bool = True,
+		freeze_decoder_first_layer: bool = True,
+		freeze_batchnorm_encoder: bool = True,
+		freeze_batchnorm_decoder: bool = False,
+		freeze_classifier: bool = True,
 		**spanvae_kwargs,
 	):
 		"""Alternate constructor for exploiting a pre-trained model on RNA-seq data.
@@ -418,7 +377,7 @@ class SpatialANVI(SCANVI):
 		st_adata
 			registed anndata object
 		sc_model
-			pretrained SCVI model
+			pretrained SCANVI model
 		"""
 
 		# rechieve the parameters from the pretrained model
@@ -448,30 +407,27 @@ class SpatialANVI(SCANVI):
 			del non_kwargs['lambda_spatial_loss']
 			del non_kwargs['sp_loss_on']
 
+		# set up the anndata object
+		registry = deepcopy(sc_model.adata_manager.registry)
+		scanvi_setup_args = registry[_SETUP_ARGS_KEY]
+
 		# prepare the query anndata and load the pretrained model
 		st_adata_prep = SCANVI.prepare_query_anndata(st_adata, sc_model, inplace=False)
-		sp_model = SCANVI.load_query_data(st_adata_prep, sc_model)
+		cls.setup_anndata(
+			st_adata_prep,
+			source_registry=registry,
+			extend_categories=True,
+			allow_missing_labels=True,
+			**scanvi_setup_args,
+		)
 
-		# change to the SpatialANVI class
-		sp_model.__class__ = cls
-		sp_model.n_genes = sp_model.summary_stats.n_vars
-		sp_model._model_summary_string = sp_model._model_summary_string.replace('ScanVI', 'SpatialANVI')
-		sp_model.init_params_['non_kwargs'].update({'spatial_loss': spatial_loss,
-													'lambda_spatial_loss': lambda_spatial_loss,
-													'sp_loss_on': sp_loss_on})
-
-		# switch to the spatial module
-		sp_model.module = SpatialANVI._module_cls(
+		# initialize the new model
+		sp_model = cls(
+			st_adata_prep,
 			spatial_loss=spatial_loss,
 			lambda_spatial_loss=lambda_spatial_loss,
 			sp_loss_on=sp_loss_on,
-			n_input=sp_model.n_genes,
-			n_batch=sp_model.summary_stats.n_batch,
-			n_labels=sp_model.summary_stats.n_labels - 1, # ignores unlabeled catgegory
-			n_continuous_cov=sp_model.summary_stats.get("n_extra_continuous_covs", 0),
-			**kwargs,
-			**non_kwargs,
-			**spanvae_kwargs,
+			**non_kwargs, **kwargs, **spanvae_kwargs
 		)
 
 		# copy the encoder and decoder state dict
@@ -491,5 +447,41 @@ class SpatialANVI(SCANVI):
 
 		sp_model.module.load_state_dict(sc_state_dict)
 		sp_model.module.eval()
+
+		# sp_model = SCANVI.load_query_data(st_adata_prep, sc_model)
+		# # change to the SpatialANVI class
+		# sp_model.__class__ = cls
+		# sp_model.n_genes = sp_model.summary_stats.n_vars
+		# sp_model._model_summary_string = sp_model._model_summary_string.replace('ScanVI', 'SpatialANVI')
+		# sp_model.init_params_['non_kwargs'].update({'spatial_loss': spatial_loss,
+		# 											'lambda_spatial_loss': lambda_spatial_loss,
+		# 											'sp_loss_on': sp_loss_on})
+
+		# # switch to the spatial module
+		# sp_model.module = SpatialANVI._module_cls(
+		# 	spatial_loss=spatial_loss,
+		# 	lambda_spatial_loss=lambda_spatial_loss,
+		# 	sp_loss_on=sp_loss_on,
+		# 	n_input=sp_model.n_genes,
+		# 	n_batch=sp_model.summary_stats.n_batch,
+		# 	n_labels=sp_model.summary_stats.n_labels - 1, # ignores unlabeled catgegory
+		# 	n_continuous_cov=sp_model.summary_stats.get("n_extra_continuous_covs", 0),
+		# 	**kwargs,
+		# 	**non_kwargs,
+		# 	**spanvae_kwargs,
+		# )
+
+		# freeze the pretrained model if neccessary
+		set_params_online_update(
+			sp_model.module,
+			unfrozen=unfrozen,
+			freeze_decoder_first_layer=freeze_decoder_first_layer,
+			freeze_batchnorm_encoder=freeze_batchnorm_encoder,
+			freeze_batchnorm_decoder=freeze_batchnorm_decoder,
+			freeze_dropout=freeze_dropout,
+			freeze_expression=freeze_expression,
+			freeze_classifier=freeze_classifier,
+		)
+		sp_model.is_trained_ = False
 
 		return sp_model
