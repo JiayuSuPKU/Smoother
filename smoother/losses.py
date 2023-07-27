@@ -136,7 +136,7 @@ class SpatialLoss(nn.Module):
 		prior (str): The prior spatial process model, can be one of 'sma','sar', 'car', 'icar'.
 		spatial_weights (List[SpatialWeightMatrix]): Spatial weight matrix collection of
 			length num_group or 1. If 1 then all groups will be subject to the same covariance.
-		scale_weights (float): Smoothing effect size (i.e., `l` in SpatialWeightMatrix.get_inv_cov).
+		rho (float): The spatial autocorrelation parameter (for SpatialWeightMatrix.get_inv_cov).
 		use_sparse (bool): Whether to use sparse inverse covariance matrix in the calculation.
 		standardize_cov (bool): Whether to standardize the covariance matrix to have same variance (1)
 			  across locations. Only proper covariance can be standardized.
@@ -149,13 +149,13 @@ class SpatialLoss(nn.Module):
 			the same confidence.
 	"""
 	def __init__(self, prior, spatial_weights : List[SpatialWeightMatrix] = None,
-				 scale_weights = 1, use_sparse = True, standardize_cov = False) -> None:
+				 rho = 1, use_sparse = True, standardize_cov = False) -> None:
 		super(SpatialLoss, self).__init__()
 
 		# store configs
 		self.prior = prior
 		self.spatial_weights = spatial_weights
-		self.scale_weights = scale_weights
+		self.rho = rho
 		self.use_sparse = use_sparse
 		self.standardize_cov = standardize_cov
 		self._sanity_check()
@@ -166,7 +166,7 @@ class SpatialLoss(nn.Module):
 				# will use the same spatial weight matrix for all celltypes
 				# self.inv_cov: 1 x n_spot x n_spot
 				self.inv_cov = self.spatial_weights.get_inv_cov(
-					self.prior, scale_weights, cached=False,
+					self.prior, rho, cached=False,
 					standardize=self.standardize_cov,
 					return_sparse=use_sparse
 				).unsqueeze(0)
@@ -175,7 +175,7 @@ class SpatialLoss(nn.Module):
 				# self.inv_cov: n_group x n_spot x n_spot
 				self.inv_cov = torch.stack(
 					[swm.get_inv_cov(
-						self.prior, self.scale_weights, cached=False,
+						self.prior, self.rho, cached=False,
 						standardize=self.standardize_cov,
 						return_sparse=use_sparse)
 					for swm in self.spatial_weights], dim=0)
@@ -295,8 +295,8 @@ class SpatialLoss(nn.Module):
 				torch.arange(num_spot).repeat(2,1),
 				torch.ones(num_spot),
 				weights.shape, dtype=torch.float32
-			) + self.scale_weights * (weights + weights.transpose(0,1)) + \
-				(self.scale_weights ** 2) * torch.matmul(weights, weights.transpose(0,1))
+			) + self.rho * (weights + weights.transpose(0,1)) + \
+				(self.rho ** 2) * torch.matmul(weights, weights.transpose(0,1))
 			cov = cov.to_dense()
 
 		else:
@@ -308,7 +308,7 @@ class SpatialLoss(nn.Module):
 			try:
 				cov = torch.cholesky_inverse(torch.linalg.cholesky(self.inv_cov[cov_ind].to_dense()))
 			except RuntimeError as exc:
-				raise RuntimeError(f"The current loss ({self.prior}, l={self.scale_weights}) "
+				raise RuntimeError(f"The current loss ({self.prior}, l={self.rho}) "
 									"contains an improper spatial covariance structure. "
 									"Please use a different spatial prior or scale "
 									"if you intend to calculate covariance decay.") from exc
@@ -426,7 +426,7 @@ class ContrastiveSpatialLoss(SpatialLoss):
 	https://arxiv.org/abs/2201.05493
 
 	By default, the inverse covariance matrix generated from `prior = 'icar'` and
-	 `scale_weights = 1` is the graph laplacian. Set `standardize_cov = True` to normalize
+	 `rho = 1` is the graph laplacian. Set `standardize_cov = True` to normalize
 	the graph laplacian.
 
 	Attributes: See `SpatialLoss`.
@@ -436,14 +436,14 @@ class ContrastiveSpatialLoss(SpatialLoss):
 		check_neg_samples (bool): Whether to check if resulting cov is positive definite.
 	"""
 	def __init__(self, prior = 'icar', spatial_weights: List[SpatialWeightMatrix] = None,
-				 scale_weights=1, use_sparse=True, standardize_cov=True,
+				 rho=1, use_sparse=True, standardize_cov=True,
 				 num_perm = 10, neg2pos_ratio = 0.5, lower_bound = -1,
 				 check_positive_definite = False) -> None:
-		# recommend using the defaul settings, i.e., `prior = 'icar'`, `scale_weights = 1`
+		# recommend using the defaul settings, i.e., `prior = 'icar'`, `rho = 1`
 		# and standardize_cov = True
 		with warnings.catch_warnings():
 			warnings.filterwarnings('ignore')
-			super().__init__(prior, spatial_weights, scale_weights, use_sparse, standardize_cov)
+			super().__init__(prior, spatial_weights, rho, use_sparse, standardize_cov)
 
 		self.num_perm = num_perm
 		self.neg2pos_ratio = neg2pos_ratio

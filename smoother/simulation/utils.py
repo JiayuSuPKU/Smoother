@@ -11,7 +11,7 @@ import pandas as pd
 from scipy.sparse import csr_matrix,lil_matrix
 import anndata
 from tqdm import tqdm
-from smoother.weights import coordinate_to_weights_knn
+from smoother.weights import _coordinate_to_weights_knn
 
 
 def sample_cell_indices(generation_snrna, annot_label, cell_count_df, cell_capture_eff_df):
@@ -66,7 +66,7 @@ def smooth_by_neighbors(shared_prop, locations2cells_matrix, coords, n_experimen
 		smoothed cell index matrix (n_spots x n_cells).
 	'''
 	# compute adjacency matrix
-	swm = coordinate_to_weights_knn(coords, k=4, row_scale=True) * shared_prop
+	swm = _coordinate_to_weights_knn(coords, k=4, row_scale=True) * shared_prop
 	swm = swm.fill_diagonal_(1 - shared_prop)
 
 	# compute smoothed cell index matrix

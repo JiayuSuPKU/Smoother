@@ -525,8 +525,8 @@ def plot_similarity_decay(df_all, title = "", plot_type = "shadow"):
 			theme(legend_position = "none")
 			)
 
-def _mono_exp(x, alpha, beta, theta):
-	return alpha * np.exp(- beta * x) + theta
+def _mono_exp(x, alpha, beta):
+	return alpha * np.exp(- beta * x)
 
 def estimate_decay_rate(x, y, return_all_params = False):
 	"""Estimate decay rate of a mono-exponential decay function.
@@ -539,13 +539,13 @@ def estimate_decay_rate(x, y, return_all_params = False):
 
 	# estimate initial condition
 	a0, t0 = y.max(), y.min()
-	p0 = (a0, np.log(a0 - t0 + 1e-5) / x.max(), t0)
+	p0 = (a0, np.log(a0 - t0 + 1e-5) / x.max())
 
 	# fit the exponential model
 	try:
 		params, _ = curve_fit(_mono_exp, x, y, p0)
 	except:
-		params, _ = curve_fit(_mono_exp, x, y, (1, 0.05, 0), maxfev=5000)
+		params, _ = curve_fit(_mono_exp, x, y, (1, 0.05), maxfev=5000)
 
 	if return_all_params:
 		return params
