@@ -308,7 +308,7 @@ class SpatialLoss(nn.Module):
 			try:
 				cov = torch.cholesky_inverse(torch.linalg.cholesky(self.inv_cov[cov_ind].to_dense()))
 			except RuntimeError as exc:
-				raise RuntimeError(f"The current loss ({self.prior}, l={self.rho}) "
+				raise RuntimeError(f"The current loss ({self.prior}, rho={self.rho}) "
 									"contains an improper spatial covariance structure. "
 									"Please use a different spatial prior or scale "
 									"if you intend to calculate covariance decay.") from exc

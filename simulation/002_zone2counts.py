@@ -33,7 +33,7 @@ def main():
 					 type = str,
 					 default = None,
 					 help = 'Output directory. Default: None to use the same directory as the input.')
-	prs.add_argument('-oa','--output-anndata', action=argparse.BooleanOptionalAction, default=True,
+	prs.add_argument('-oa','--output-anndata', action='store_true',
 					 help = 'Whether to output entire anndata objects for synthetic spatial data ' \
 							'and paired single cell data. Default: True.' )				
 

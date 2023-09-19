@@ -41,12 +41,19 @@ def normalize_minmax(x, min_zero = True, return_scale = False):
 
 	return x_norm
 
-def _pca(features, dim):
-	"""Dimension reduction by PCA."""
+def _z_score(features):
+	"""Z-score standardization."""
 	# standardize and remove constant features
+	# features.shape: num_feature x num_spot
 	features_var = features.std(1) # feature level variance
 	features_scaled = (features - features.mean(1, keepdim=True)) / features_var[:, None]
 	features_scaled = features_scaled[features_var > 0,:]
+	return features_scaled
+
+def _pca(features, dim):
+	"""Dimension reduction by PCA."""
+	# standardize and remove constant features
+	features_scaled = _z_score(features)
 
 	# run pca
 	torch.manual_seed(0) # for repeatability, fix the random seed for pca_lowrank
