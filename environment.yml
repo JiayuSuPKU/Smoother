@@ -5,16 +5,20 @@ dependencies:
   - python<4.0
   - pip
   - scipy
-  - scikit-learn
   - pytorch
   - pandas
+  - scanpy
+  - python-igraph 
+  - leidenalg
+  - scvi-tools
+  - scikit-learn
   - matplotlib==3.5.3
   - plotnine==0.8.0
   - jupyterlab
   - ipywidgets
-  - scanpy # for simulation
-  - python-igraph # for simulation
-  - leidenalg # for simulation
+  - pynndescent
+  - cvxpy
   - pip:
-    - squidpy # for simulation
-    - fuzzy-c-means # for simulation
+    - squidpy
+    - fuzzy-c-means
+    - scikit-bio==0.5.8
