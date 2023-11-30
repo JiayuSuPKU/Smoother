@@ -12,6 +12,7 @@ from scipy.optimize import linear_sum_assignment
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from plotnine import *
+from smoother.utils import normalize_minmax
 
 def plot_celltype_props(p_inf, coords, cell_type_names = None, n_col = 4, figsize = None):
 	"""Plot the deconvolution results.
@@ -206,6 +207,9 @@ def cluster_and_plot_celltype_props(p_inf_list, coords, names = None, n_col = 4,
 
 	if isinstance(coords, pd.DataFrame):
 		coords = coords.values
+
+	# scale the coordinates for geom_tile
+	coords = normalize_minmax(coords)
 
 	# cluster cell type proportions
 	clu_inf_list = [
