@@ -1,4 +1,5 @@
 # Smoother: A Unified and Modular Framework to Incorporate Structural Dependency in Spatial Omics Data
+[![DOI](https://zenodo.org/badge/546425993.svg)](https://zenodo.org/doi/10.5281/zenodo.10242921)
 ![Overview](/docs/img/Smoother_overview.png)
 
 ## Description
@@ -47,13 +48,6 @@ python -m ipykernel install --user --name=smoother
 pip install -e .
 ```
 
-## Smoother tutorials:
-Under construction. Check back soon!
-1. ~~[Smoother-guided data imputation in the DLPFC dataset](/tutorials/tutorial_impute.ipynb)~~
-2. ~~[Smoother-guided cell-type deconvolution in the DLPFC dataset](/tutorials/tutorial_deconv.ipynb)~~
-3. ~~[Smoother-guided dimension reduction in the DLPFC dataset](/tutorials/tutorial_dr.ipynb)~~
-4. [Spatial transcriptomics data simulation](/simulation/README.md)
-
 ## Basic usage:
 ### Spatial loss construction:
 ```python
@@ -61,7 +55,7 @@ Under construction. Check back soon!
 import torch
 from smoother import SpatialWeightMatrix, SpatialLoss, ContrastiveSpatialLoss
 from smoother.models.deconv import NNLS
-from smoother.models.reduction import PCA
+from smoother.models.reduction import SpatialPCA, SpatialVAE
 
 # load data
 x = torch.tensor(...) # n_gene x n_celltype, the reference signature matrix
@@ -94,10 +88,32 @@ loss = spatial_loss(variable_of_interest)
 model = NNLS()
 model.deconv(x, y, spatial_loss=spatial_loss, lambda_spatial_loss=1, ...)
 
-# dimension reduction
-model = PCA(num_feature = y.shape[0], num_pc = 10)
-model.reduce(y, ...)
+# dimension reduction de novo from spatial data
+SpatialVAE.setup_anndata(adata, layer="raw")
+model = SpatialVAE(st_adata=adata, spatial_loss=spatial_loss)
+model.train(max_epochs = 400, lr = 0.01, accelerator='cpu')
+
+# dimension reduction from single-cell models
+baseline = SpatialPCA(rna_adata, layer='scaled', n_latent=30)
+baseline.reduce(...)
+model_sp = SpatialPCA.from_rna_model(
+    rna_model=baseline, st_adata=sp_data, layer='scaled',
+    spatial_loss=spatial_loss, lambda_spatial_loss=0.1
+)
+
+model_sp = SpatialVAE.from_rna_model(
+    st_adata = sp_data, sc_model = rna_scvi_model, 
+    spatial_loss=sp_loss, lambda_spatial_loss=0.01,
+    unfrozen=True,
+)
 ```
+
+## Smoother tutorials:
+Under construction. Check back soon!
+1. ~~[Smoother-guided data imputation in the DLPFC dataset](/tutorials/tutorial_impute.ipynb)~~
+2. ~~[Smoother-guided cell-type deconvolution in the DLPFC dataset](/tutorials/tutorial_deconv.ipynb)~~
+3. ~~[Smoother-guided dimension reduction in the DLPFC dataset](/tutorials/tutorial_dr.ipynb)~~
+4. [Spatial transcriptomics data simulation](/simulation/README.md)
 
 ## References:
 Su, Jiayu, et al. "Smoother: A Unified and Modular Framework for Incorporating Structural Dependency in Spatial Omics Data." bioRxiv (2022): 2022-10.
