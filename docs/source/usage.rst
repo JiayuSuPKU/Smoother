@@ -15,9 +15,9 @@ Here we briefly outline key components and steps of the Smoother pipeline.
 **Spatial graph construction**
 ----------------------------------
 
-We first need to construct a weighted spatial graph using physical positions, histology, and additional features, which serves to represent spatial dependencies a priori. 
-The neighborhood graph is represented as an :math:`n \times n` adjacency matrix :math:`W` such that 
-each entry :math:`W_{ij}` indicates the connectivity between sample :math:`i` and :math:`j` (referred to as `SpatialWeightMatrix`).
+Our first step is to construct a weighted spatial graph using physical positions, histology, and additional features, which serves to represent spatial dependencies `a priori`. 
+The neighborhood graph is represented as an :math:`n \times n` adjacency matrix :math:`W`, referred to as `SpatialWeightMatrix`, such that 
+each entry :math:`W_{ij}` indicates the connectivity between sample :math:`i` and :math:`j`.
 
 .. code-block:: python
 
@@ -39,7 +39,8 @@ each entry :math:`W_{ij}` indicates the connectivity between sample :math:`i` an
 
 .. note::
 
-   To encode information on region boundary, the weight matrix can be optionally scaled using additional information. 
+   Optionally, the weight matrix can be scaled to encode information on region boundary using additional information. 
+   See :class:`smoother.SpatialWeightMatrix` for details.
 
 This includes scaling by expression,
 
@@ -77,7 +78,7 @@ and by external annotations on spatial regions and clusters (no interaction betw
 ----------------------------------
 
 Subsequently, Smoother translates the spatial weights matrix into a covariance structure according to assumptions on the underlying stochastic process. 
-The covariance is then converted into a modular sparse loss function (referred to as `SpatialLoss`) through a multivariate normal (MVN) prior. 
+The covariance is then converted into a modular sparse loss function, referred to as `SpatialLoss`, through a multivariate normal (MVN) prior. 
 When applied to a random variable of interest, the spatial loss regularizes incoherence in the variable and thus improve performance in downstream tasks. 
 
 .. code-block:: python
@@ -104,8 +105,8 @@ When applied to a random variable of interest, the spatial loss regularizes inco
    During downstream optimizations the covariance is always fixed since it represents prior belief.
    The loss is proportional to the negative log likelihood of the prior :math:`L_{sp}(X; \Sigma) = \frac{1}{2}X^T \Sigma^{-1}X`.
 
-Smoother offers five different yet related spatial processes: CAR, SAR (simultaneous autoregressive), ICAR, ISAR, and SMA (spatial moving average). 
-Specifically, CAR and SAR are equivalent upon transformation, and ICAR and ISAR are the weights-scaled versions so that 
+Smoother offers five different yet related spatial processes: CAR (conditional autoregressive), SAR (simultaneous autoregressive), ICAR, ISAR, and 
+SMA (spatial moving average). Specifically, CAR and SAR are equivalent upon transformation, and ICAR and ISAR are the weights-scaled versions so that 
 the autocorrelation parameter :math:`\rho` falls in [0, 1]. By adjusting :math:`\rho`, these models can achieve parallel regularization effects. 
 Based on numerical considerations, we typically recommend using ICAR with varying :math:`\rho` (or ISAR with smaller :math:`\rho`) 
 to accommodate data with diverse neighborhood structures, for instance, “ICAR (:math:`\rho = 0.99`)” for data with clear anatomy and 
@@ -134,9 +135,12 @@ This is done by shuffling spot locations and producing corrupted covariance stru
    To avoid exploding loss, the contrastive loss function has an intrinsic lower bound.
 
 **Incorpotation into downstream tasks**
-----------------------------------
+--------------------------------------------
 Given the `SpatialLoss`, it is essentially possible to morph any model with a loss objective :math:`L_m` into a spatially aware version 
-by minimizing a new joint loss function :math:`L_{joint} = L_m + \lambda L_{sp}(X_s; \Sigma)`. 
+by minimizing a new joint loss function :math:`L_{joint} = L_m(X, ...) + \lambda L_{sp}(X; \Sigma)`. 
+Optimization is generally performed using gradient-based methods. 
+We have implemented a collection of models in the tasks of data imputation, cell-type deconvolution, and dimensionality reduction, 
+which will be introduced with more details in the next section.
 
 .. code-block:: python
 
@@ -163,6 +167,4 @@ by minimizing a new joint loss function :math:`L_{joint} = L_m + \lambda L_{sp}(
        spatial_loss=sp_loss, lambda_spatial_loss=0.01,
        unfrozen=True,
    )
-
-['shells', 'gorgonzola', 'parsley']
 

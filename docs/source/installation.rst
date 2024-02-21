@@ -4,8 +4,8 @@ Installation
 **Minimal installation**
 ------------------------
 
-If you only want to use the core functionalities, namely :ref:`SpatialWeightMatrix <api SpatialWeightMatrix>`
-and :ref:`SpatialLoss <api SpatialLoss>`, Smoother can be directly installed using `pip`.
+If you only want to use the core functionalities, namely :class:`smoother.SpatialWeightMatrix`
+and :class:`smoother.SpatialLoss`, Smoother can be directly installed using `pip`.
 
 .. code-block:: zsh
 
@@ -28,7 +28,7 @@ Minimal software dependencies include
 **Full installation**
 ------------------------
 
-Models in the dimensionality reduction module (:ref:`SpatialAE <api SpatialAE>`, :ref:`SpatialVAE <api SpatialVAE>`) is built upon `scvi-tools`. 
+Models in the dimensionality reduction module (:class:`smoother.SpatialAE`, :class:`smoother.SpatialVAE`) is built upon `scvi-tools`. 
 Here we refer to the `original repository for installation instructions on different systems <https://docs.scvi-tools.org/en/stable/installation.html>`_.
 
 .. code-block:: zsh

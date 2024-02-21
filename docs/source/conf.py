@@ -18,7 +18,12 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx_rtd_theme',
     'sphinx.ext.autosectionlabel',
+    'autoapi.extension'
 ]
+
+autoapi_dirs = ['../../smoother']
+autoapi_add_toctree_entry = False
+
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
