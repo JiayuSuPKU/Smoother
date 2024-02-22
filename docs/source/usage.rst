@@ -12,7 +12,7 @@ Here we briefly outline key components and steps of the Smoother pipeline.
    from smoother.models.deconv import NNLS
    from smoother.models.reduction import SpatialPCA, SpatialVAE
 
-**Spatial graph construction**
+Spatial graph construction
 ----------------------------------
 
 Our first step is to construct a weighted spatial graph using physical positions, histology, and additional features, which serves to represent spatial dependencies `a priori`. 
@@ -74,7 +74,7 @@ and by external annotations on spatial regions and clusters (no interaction betw
    class_anno = adata.obs['region'].to_numpy() # per-spot region/cluster annotation, n_spot x 1
    weights.scale_by_identity(class_anno, boundary_connectivity=0)
 
-**Spatial loss construction**
+Spatial loss construction
 ----------------------------------
 
 Subsequently, Smoother translates the spatial weights matrix into a covariance structure according to assumptions on the underlying stochastic process. 
@@ -134,7 +134,7 @@ This is done by shuffling spot locations and producing corrupted covariance stru
    The corresponding covariance of the contrastive loss may not be positive semi-definite because of the negative sampling.
    To avoid exploding loss, the contrastive loss function has an intrinsic lower bound.
 
-**Incorpotation into downstream tasks**
+Downstream task applications
 --------------------------------------------
 Given the `SpatialLoss`, it is essentially possible to morph any model with a loss objective :math:`L_m` into a spatially aware version 
 by minimizing a new joint loss function :math:`L_{joint} = L_m(X, ...) + \lambda L_{sp}(X; \Sigma)`. 

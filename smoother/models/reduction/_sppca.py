@@ -59,6 +59,8 @@ class SpatialPCA(nn.Module):
 				data = data.toarray()
 			self._data = torch.tensor(data.T) # n_feature x n_sample
 
+		self._data = self._data.float()
+
 	def _gram_schmidt(self, U):
 		"""Project the PC basis matrix to the feasible space.
 

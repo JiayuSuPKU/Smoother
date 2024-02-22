@@ -1,7 +1,7 @@
 Installation
 ============
 
-**Minimal installation**
+Minimal installation
 ------------------------
 
 If you only want to use the core functionalities, namely :class:`smoother.SpatialWeightMatrix`
@@ -25,7 +25,7 @@ Minimal software dependencies include
    pandas
    tqdm
 
-**Full installation**
+Full installation
 ------------------------
 
 Models in the dimensionality reduction module (:class:`smoother.SpatialAE`, :class:`smoother.SpatialVAE`) is built upon `scvi-tools`. 

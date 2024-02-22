@@ -18,7 +18,9 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx_rtd_theme',
     'sphinx.ext.autosectionlabel',
-    'autoapi.extension'
+    'autoapi.extension',
+    "nbsphinx",
+    "sphinx_gallery.load_style",
 ]
 
 autoapi_dirs = ['../../smoother']

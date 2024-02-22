@@ -14,7 +14,7 @@ Smoother - A unified spatial dependency framework in PyTorch
    :hidden:
    :caption: Tutorials
 
-   tutorial
+   tutorials/quickstart
 
 .. toctree::
    :maxdepth: 2
@@ -48,7 +48,7 @@ Check out the :doc:`installation` and :doc:`usage` sections for further informat
 
    This documentation is under active development.
 
-**Citation**
+Citation
 ---------------
 Su, Jiayu, et al. "Smoother: a unified and modular framework for incorporating structural dependency in spatial omics data." Genome Biology 24.1 (2023): 291.
 https://link.springer.com/article/10.1186/s13059-023-03138-x
