@@ -15,6 +15,10 @@ Smoother - A unified spatial dependency framework in PyTorch
    :caption: Tutorials
 
    tutorials/quickstart
+   tutorials/tutorial_impute
+   tutorials/tutorial_deconv
+   tutorials/tutorial_dr
+   tutorials/tutorial_joint_mapping
 
 .. toctree::
    :maxdepth: 2

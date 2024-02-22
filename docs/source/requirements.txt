@@ -6,4 +6,5 @@ tqdm>=4.65.0
 sphinx_rtd_theme
 sphinx-autoapi
 nbsphinx
+IPython
 sphinx-gallery
