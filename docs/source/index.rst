@@ -8,6 +8,7 @@ Smoother - A unified spatial dependency framework in PyTorch
 
    installation
    usage
+   loss_design
 
 .. toctree::
    :maxdepth: 2

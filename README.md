@@ -3,14 +3,15 @@
 ![Overview](/docs/img/Smoother_overview.png)
 
 ## Description
-Smoother is a Python package that provides a unified framework to incorporate dependency in spatial omics data by formulating spatial priors from neighborhood graph. Implemented in `Pytorch`, Smoother is modular and ultra-efficient, often capable of analyzing samples tens of thousands of spots in seconds. The key innovation of Smoother is the decoupling of the prior belief on spatial structure (i.e., neighboring spots tend to be more similar) from the likelihood of a non-spatial data-generating model. This flexibility allows the same prior to be used in different models, and the same model to accommodate data with varying or even zero spatial structures. In other words, Smoother can be seamlessly integrated into existing non-spatial models and pipelines (e.g. single-cell analyses) and make them spatially aware. In particular, Smoother provides the following functionalities:
+Smoother is a Python package built for modeling spatial dependency and enforcing spatial coherence in spatial omics data analysis. Implemented in `Pytorch`, Smoother is modular and ultra-efficient, often capable of analyzing samples tens of thousands of spots in seconds. The key innovation of Smoother is the decoupling of the prior belief on spatial structure (i.e., neighboring spots tend to be more similar) from the likelihood of a non-spatial data-generating model. This flexibility allows the same prior to be used in different models, and the same model to accommodate data with varying or even zero spatial structures. In other words, Smoother can be seamlessly integrated into existing non-spatial models and pipelines (e.g. single-cell analyses) and make them spatially aware. In particular, Smoother provides the following functionalities:
 
-1. **Spatial loss**: A quadratic loss equivalent to an MVN prior reflecting the spatial structure of the data. It can be used to regularize any spatial random variable of interest.
+1. **Spatial loss**: A quadratic loss equivalent to a multivariate Gaussian (MVN) prior reflecting the spatial structure of the data. It can be used to regularize any spatial random variable of interest.
 2. **Data imputation**: Mitigates technical noise by borrowing information from the neighboring spots. It can also be applied to enhance the resolution of the data to an arbitrary level in seconds.
 3. **Cell-type deconvolution**: Infers the spatially coherent cell-type composition of each spot using reference cell-type expression profiles. Smoother is one of the few deconvolution methods that actually enforce spatial coherence by design.
 4. **Dimension reduction**: Find the spatially aware latent representations of spatial omics data in a model-agnostic manner, such that single-cell data without spatial structure can be jointly analyzed using the same pipeline.
 
-For method details, check [the Smoother paper (Su Jiayu, et al. 2022)](https://www.biorxiv.org/content/10.1101/2022.10.25.513785v2.full) and [the Supplementary Notes](/docs/Smoother_sup_notes.pdf).
+See the [documentation page](https://smoother.readthedocs.io/en/latest/index.html) for basic usages, tutorials and examples. 
+For mathematical details, check [the Smoother paper (Su Jiayu, et al. 2022)](https://www.biorxiv.org/content/10.1101/2022.10.25.513785v2.full) and [the Supplementary Notes](/docs/Smoother_sup_notes.pdf).
 
 ## Installation
 If you only want to use the core functionalities, namely `SpatialWeightMatrix` and `SpatialLoss`, Smoother can be directly installed using `pip` 
@@ -48,8 +49,8 @@ python -m ipykernel install --user --name=smoother
 pip install -e .
 ```
 
-## Basic usage:
-### Spatial loss construction:
+## Basic usage
+### Spatial loss construction
 ```python
 # import spatial losses and models
 import torch
@@ -81,7 +82,7 @@ variable_of_interest = torch.tensor(...) # n_vars x n_spot
 loss = spatial_loss(variable_of_interest)
 ```
 
-### Downstream tasks:
+### Downstream tasks
 ```python
 # choose model and solve the problem
 # deconvolution
@@ -108,13 +109,9 @@ model_sp = SpatialVAE.from_rna_model(
 )
 ```
 
-## Smoother tutorials:
-Under construction. Check back soon!
-1. ~~[Smoother-guided data imputation in the DLPFC dataset](/tutorials/tutorial_impute.ipynb)~~
-2. ~~[Smoother-guided cell-type deconvolution in the DLPFC dataset](/tutorials/tutorial_deconv.ipynb)~~
-3. ~~[Smoother-guided dimension reduction in the DLPFC dataset](/tutorials/tutorial_dr.ipynb)~~
-4. [Spatial transcriptomics data simulation](/simulation/README.md)
+## Tutorials and examples
+https://smoother.readthedocs.io/en/latest/index.html
 
-## References:
-Su, Jiayu, et al. "Smoother: A Unified and Modular Framework for Incorporating Structural Dependency in Spatial Omics Data." bioRxiv (2022): 2022-10.
-https://www.biorxiv.org/content/10.1101/2022.10.25.513785v2.full
+## Citation
+Su, Jiayu, et al. "Smoother: a unified and modular framework for incorporating structural dependency in spatial omics data." Genome Biology 24.1 (2023): 291.
+https://link.springer.com/article/10.1186/s13059-023-03138-x
