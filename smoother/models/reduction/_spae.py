@@ -67,6 +67,8 @@ class AutoEncoderClass(nn.Module):
 				data = data.toarray()
 			self._data = torch.tensor(data.T) # n_feature x n_sample
 
+		self._data = self._data.float()
+
 	def forward(self, x):
 		return self.decode(self.encode(x))
 

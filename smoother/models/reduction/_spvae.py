@@ -184,7 +184,6 @@ class SpatialVAE(SCVI):
 		self,
 		max_epochs: int = 400,
 		lr: float = 0.01,
-		use_gpu: Optional[Union[str, int, bool]] = None,
 		accelerator: str = "auto",
 		devices: Union[int, List[int], str] = "auto",
 		plan_kwargs: Optional[dict] = None,
@@ -212,7 +211,6 @@ class SpatialVAE(SCVI):
 		# fit the model with all spots (no mini-batch)
 		super().train(
 			max_epochs=max_epochs,
-			use_gpu=use_gpu,
 			accelerator=accelerator,
 			devices=devices,
 			train_size=1,
