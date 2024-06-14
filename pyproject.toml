@@ -3,8 +3,8 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Smoother"
-version = "0.1.0"
+name = "smoother-omics"
+version = "1.0.3"
 description = "A Unified and Modular Framework to Incorporate Structural Dependency in Spatial Omics Data"
 authors = [
   {name = "Jiayu Su"}
@@ -12,3 +12,17 @@ authors = [
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = "<4"
+
+dependencies = [
+    "torch",
+    "scipy",
+    "scikit-learn",
+    "pandas",
+    "tqdm"
+]
+
+[project.urls]
+repository = "https://github.com/JiayuSuPKU/Smoother"
+
+[tool.setuptools]
+packages.find = {where = ["."], exclude = ["simulation", "docs", "tests"]}

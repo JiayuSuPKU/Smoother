@@ -9,6 +9,10 @@ and :class:`smoother.SpatialLoss`, Smoother can be directly installed using `pip
 
 .. code-block:: zsh
 
+   # from PyPI (stable version)
+   $ pip install smoother-omics
+
+   # or from github (latest version)
    $ pip install git+https://github.com/JiayuSuPKU/Smoother.git#egg=smoother
 
 .. note::
