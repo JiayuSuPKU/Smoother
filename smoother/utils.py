@@ -1,6 +1,7 @@
 """
 Utility functions
 """
+import warnings
 import numpy as np
 import torch
 import pandas as pd
@@ -9,7 +10,13 @@ from scipy.spatial import distance
 from scipy.optimize import curve_fit
 from sklearn.neighbors import NearestNeighbors
 from tqdm import tqdm
-from plotnine import *
+try:
+	from plotnine import *
+except:
+	warnings.warn(
+    	"Package 'plotnine' not installed. Some visualization functions will not work.",
+		category=ImportWarning
+	)
 
 
 def normalize_minmax(x, min_zero = True, return_scale = False):

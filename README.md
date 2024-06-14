@@ -11,12 +11,19 @@ Smoother is a Python package built for modeling spatial dependency and enforcing
 4. **Dimension reduction**: Find the spatially aware latent representations of spatial omics data in a model-agnostic manner, such that single-cell data without spatial structure can be jointly analyzed using the same pipeline.
 
 See the [documentation page](https://smoother.readthedocs.io/en/latest/index.html) for basic usages, tutorials and examples. 
-For mathematical details, check [the Smoother paper (Su Jiayu, et al. 2022)](https://www.biorxiv.org/content/10.1101/2022.10.25.513785v2.full) and [the Supplementary Notes](/docs/Smoother_sup_notes.pdf).
+For mathematical details, check [the Smoother paper (Su Jiayu, et al. 2023)](https://link.springer.com/article/10.1186/s13059-023-03138-x) and [the Supplementary Notes](/docs/Smoother_sup_notes.pdf).
+
+## Tutorials and examples
+https://smoother.readthedocs.io/en/latest/index.html
 
 ## Installation
-If you only want to use the core functionalities, namely `SpatialWeightMatrix` and `SpatialLoss`, Smoother can be directly installed using `pip` 
+If you only want to use the core functionalities, namely `SpatialWeightMatrix` and `SpatialLoss`, Smoother can be directly installed using `pip` either from github (latest version)
 ```zsh
 pip install git+https://github.com/JiayuSuPKU/Smoother.git#egg=smoother
+```
+or from PyPI (stable version)
+```zsh
+pip install smoother-omics
 ```
 
 The dimensionality reduction module (`SpatialAE`, `SpatialVAE`) is built upon [scvi-tools](https://docs.scvi-tools.org/en/stable/index.html). Here we refer to the [original repository for installation instructions on different systems](https://docs.scvi-tools.org/en/stable/installation.html).
@@ -108,9 +115,6 @@ model_sp = SpatialVAE.from_rna_model(
     unfrozen=True,
 )
 ```
-
-## Tutorials and examples
-https://smoother.readthedocs.io/en/latest/index.html
 
 ## Citation
 Su, Jiayu, et al. "Smoother: a unified and modular framework for incorporating structural dependency in spatial omics data." Genome Biology 24.1 (2023): 291.
