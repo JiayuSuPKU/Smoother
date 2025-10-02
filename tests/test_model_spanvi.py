@@ -3,22 +3,28 @@ import numpy as np
 import torch
 from copy import deepcopy
 from anndata import AnnData
-from smoother.models.reduction._spvae import SPVAE, SpatialVAE
+from smoother.models.reduction._spanvi import SPANVAE, SpatialANVI
 from smoother.weights import SpatialWeightMatrix
 from smoother.losses import SpatialLoss
+
+from scvi.module import SCANVAE
+from scvi.model import SCVI, SCANVI
 from scvi import REGISTRY_KEYS
 from scvi.module._constants import MODULE_KEYS
-from scvi.module import VAE
-from scvi.model import SCVI
 
-class TestSPVAE(unittest.TestCase):
+class TestSPANVAE(unittest.TestCase):
     def setUp(self):
         # Small synthetic dataset
         self.n_input = 10
         self.n_spots = 100
         self.n_latent = 5
+        self.n_batch = 2
+        self.n_labels = 3
+
         np.random.seed(42)
         self.X = np.random.rand(self.n_input, self.n_spots)
+        self.labels = np.random.choice(self.n_labels, self.n_spots)
+        self.batch = np.random.choice(self.n_batch, self.n_spots)
 
         self.coords = np.random.rand(self.n_spots, 2)
         self.swm = SpatialWeightMatrix()
@@ -26,12 +32,14 @@ class TestSPVAE(unittest.TestCase):
         self.spatial_loss = SpatialLoss(prior='icar', spatial_weights=self.swm, rho=0.5, standardize_cov=True)
 
         self.adata = AnnData(self.X.T) # n_spots x n_input
+        self.adata.obs['batch'] = self.batch
+        self.adata.obs['labels'] = self.labels
 
         # Dummy tensors for loss
         self.tensors = {
-            REGISTRY_KEYS.X_KEY: torch.randn(self.n_spots, self.n_input),
-            REGISTRY_KEYS.BATCH_KEY: torch.zeros(self.n_spots, dtype=torch.long),
-            REGISTRY_KEYS.LABELS_KEY: torch.zeros(self.n_spots, dtype=torch.long),
+            REGISTRY_KEYS.X_KEY: torch.from_numpy(self.X.T).float(),
+            REGISTRY_KEYS.BATCH_KEY: torch.from_numpy(self.batch).long(),
+            REGISTRY_KEYS.LABELS_KEY: torch.from_numpy(self.labels).long(),
         }
         self.inference_outputs = {
             MODULE_KEYS.QZ_KEY: torch.distributions.Normal(torch.zeros(self.n_spots, self.n_latent), torch.ones(self.n_spots, self.n_latent)),
@@ -47,78 +55,109 @@ class TestSPVAE(unittest.TestCase):
         }
 
     def test_spatial_loss(self):
-        # Test with spatial loss as an separate loss term
-        self.model = SPVAE(
+        # Test with spatial loss as an additional loss term
+        model = SPANVAE(
             n_input=self.n_input,
             spatial_loss=self.spatial_loss,
-            lambda_spatial_loss=0.2,
+            lambda_spatial_loss=0.5,
             sp_loss_as_kl=False,
+            n_batch=self.n_batch,
+            n_labels=self.n_labels,
             n_latent=self.n_latent,
         )
-        out = self.model.loss(self.tensors, self.inference_outputs, self.generative_outputs)
+
+        out = model.loss(
+            self.tensors,
+            self.inference_outputs,
+            self.generative_outputs,
+        )
         self.assertTrue(hasattr(out, "kl_global"))
         self.assertTrue(torch.is_tensor(out.kl_global["kl_global"]))
 
         # Test with spatial loss as KL divergence
-        self.model = SPVAE(
+        model = SPANVAE(
             n_input=self.n_input,
             spatial_loss=self.spatial_loss,
-            lambda_spatial_loss=0.2,
+            lambda_spatial_loss=0.5,
             sp_loss_as_kl=True,
+            n_batch=self.n_batch,
+            n_labels=self.n_labels,
             n_latent=self.n_latent,
         )
-        out = self.model.loss(self.tensors, self.inference_outputs, self.generative_outputs)
+        out = model.loss(
+            self.tensors,
+            self.inference_outputs,
+            self.generative_outputs,
+        )
         self.assertTrue(hasattr(out, "kl_global"))
         self.assertTrue(torch.is_tensor(out.kl_global["kl_global"]))
-        self.assertTrue(out.kl_global["kl_global"] == out.kl_local[MODULE_KEYS.KL_Z_KEY])
 
     def test_from_vae(self):
-        vae = VAE(n_input=self.n_input)
-        spvae = SPVAE.from_vae(vae, spatial_loss=self.spatial_loss, lambda_spatial_loss=0.5, sp_loss_as_kl=True)
-        self.assertIsInstance(spvae, SPVAE)
-        self.assertEqual(spvae.l_sp_loss, 0.5)
-        self.assertTrue(spvae.sp_loss_as_kl)
+        vae = SCANVAE(
+            n_input=self.n_input,
+            n_batch=self.n_batch,
+            n_labels=self.n_labels,
+            n_latent=self.n_latent,
+        )
+        spanvae = SPANVAE.from_vae(
+            vae, spatial_loss=self.spatial_loss,
+            lambda_spatial_loss=0.2, sp_loss_as_kl=False
+        )
+        self.assertIsInstance(spanvae, SPANVAE)
+        self.assertEqual(spanvae.l_sp_loss, 0.2)
+        self.assertFalse(spanvae.sp_loss_as_kl)
 
-class TestSpatialVAE(unittest.TestCase):
+
+class TestSpatialANVI(unittest.TestCase):
     def setUp(self):
         # Small synthetic dataset
         self.n_input = 10
         self.n_spots = 100
         self.n_latent = 5
+        self.n_batch = 2
+        self.n_labels = 3
+
         np.random.seed(42)
-        self.X = np.random.poisson(5, (self.n_spots, self.n_input))
+        self.X = np.random.rand(self.n_input, self.n_spots)
+        self.labels = np.random.choice(self.n_labels, self.n_spots)
+        self.batch = np.random.choice(self.n_batch, self.n_spots)
 
         self.coords = np.random.rand(self.n_spots, 2)
         self.swm = SpatialWeightMatrix()
         self.swm.calc_weights_knn(self.coords, k=4, symmetric=True, row_scale=False, verbose=False)
         self.spatial_loss = SpatialLoss(prior='icar', spatial_weights=self.swm, rho=0.5, standardize_cov=True)
 
-        self.adata = AnnData(self.X) # n_spots x n_input
-        self.adata.layers["counts"] = self.X
+        self.adata = AnnData(self.X.T) # n_spots x n_input
+        self.adata.obs['batch'] = self.batch
+        self.adata.obs['labels'] = self.labels
 
-        SpatialVAE.setup_anndata(self.adata, layer="counts")
-
+        SpatialANVI.setup_anndata(self.adata, batch_key="batch", labels_key="labels", unlabeled_category=0)
 
     def test_init(self):
-        model = SpatialVAE(
+        model = SpatialANVI(
             st_adata=self.adata,
             spatial_loss=self.spatial_loss,
             lambda_spatial_loss=0.1,
             sp_loss_as_kl=False,
             n_latent=self.n_latent,
+            n_layers=1,
+            dropout_rate=0.1,
         )
-        self.assertIsInstance(model.module, SPVAE)
+        self.assertIsInstance(model, SpatialANVI)
+        self.assertIsInstance(model.module, SPANVAE)
         self.assertEqual(model.module.l_sp_loss, 0.1)
 
     def test_train(self):
-        model = SpatialVAE(
+        model = SpatialANVI(
             st_adata=self.adata,
             spatial_loss=self.spatial_loss,
             lambda_spatial_loss=1.0,
             sp_loss_as_kl=False,
             n_latent=self.n_latent,
+            n_layers=1,
+            dropout_rate=0.1,
         )
-        model.train(max_epochs=10, lr = 0.01, accelerator = "cpu")
+        model.train(max_epochs=10, accelerator = "cpu")
         self.assertIsNotNone(model.history)
         self.assertIsNotNone(model.dr_logs['elapsed_time'])
         self.assertTrue(len(model.dr_logs['total_loss']) > 0)
@@ -126,27 +165,27 @@ class TestSpatialVAE(unittest.TestCase):
         self.assertTrue(len(model.dr_logs['spatial_loss']) > 0)
 
     def test_from_rna_model(self):
-        # initialize and train a scVI model on the same data
+        # initialize and train a SCANVI model on the same data
         adata = deepcopy(self.adata)
-        SCVI.setup_anndata(adata, layer="counts")
-        rna_model = SCVI(adata, n_latent=self.n_latent)
+        SCANVI.setup_anndata(adata, batch_key="batch", labels_key="labels", unlabeled_category=0)
+        rna_model = SCANVI(adata, n_latent=self.n_latent)
         rna_model.train(max_epochs=10, accelerator = "cpu")
         self.assertIsNotNone(rna_model.history)
 
-        # then convert to SpatialVAE
-        sp_model = SpatialVAE.from_rna_model(
+        # then convert to SpatialANVI
+        spanvi = SpatialANVI.from_rna_model(
             sc_model=rna_model,
             st_adata=adata,
             spatial_loss=self.spatial_loss,
-            lambda_spatial_loss=1.0,
-            sp_loss_as_kl=True,
+            lambda_spatial_loss=0.1,
+            sp_loss_as_kl=True
         )
-        sp_model.train(max_epochs=10, lr = 0.01, accelerator = "cpu")
-        self.assertIsNotNone(sp_model.history)
-        self.assertIsNotNone(sp_model.dr_logs['elapsed_time'])
-        self.assertTrue(len(sp_model.dr_logs['total_loss']) > 0)
-        self.assertTrue(len(sp_model.dr_logs['recon_loss']) > 0)
-        self.assertTrue(len(sp_model.dr_logs['spatial_loss']) > 0)
+        spanvi.train(max_epochs=10, accelerator = "cpu")
+        self.assertIsNotNone(spanvi.history)
+        self.assertIsNotNone(spanvi.dr_logs['elapsed_time'])
+        self.assertTrue(len(spanvi.dr_logs['total_loss']) > 0)
+        self.assertTrue(len(spanvi.dr_logs['recon_loss']) > 0)
+        self.assertTrue(len(spanvi.dr_logs['spatial_loss']) > 0)
 
 if __name__ == "__main__":
     unittest.main()

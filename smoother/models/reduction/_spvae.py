@@ -186,9 +186,10 @@ class SPVAE(VAE):
         spvae.spatial_loss = spatial_loss
         spvae.l_sp_loss = lambda_spatial_loss
         spvae.sp_loss_as_kl = sp_loss_as_kl
+        spvae.diag_sp_inv_cov = None
 
         if sp_loss_as_kl:
-            if spatial_loss is None:
+            if spatial_loss is None or lambda_spatial_loss == 0:
                 raise ValueError("spatial_loss must be provided when sp_loss_as_kl is True.")
             if spatial_loss.use_sparse:
                 spvae.diag_sp_inv_cov = torch.diagonal(spatial_loss.inv_cov_2d_sp.to_dense())
