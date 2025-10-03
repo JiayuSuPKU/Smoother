@@ -62,3 +62,14 @@ __pycache__/
 
 # notebook checkpoints
 .ipynb_checkpoints
+
+# scvi logs
+lightning_logs/
+scvi_log/
+
+# distribution / packaging
+dist/
+build/
+*.egg
+*.whl
+*.pyc
