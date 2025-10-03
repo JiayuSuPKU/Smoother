@@ -4,8 +4,8 @@ Installation
 Minimal installation
 ------------------------
 
-If you only want to use the core functionalities, namely :class:`smoother.SpatialWeightMatrix`
-and :class:`smoother.SpatialLoss`, Smoother can be directly installed using `pip`.
+To use core functionalities (:class:`smoother.SpatialWeightMatrix` and :class:`smoother.SpatialLoss`), 
+Smoother can be directly installed using `pip`
 
 .. code-block:: zsh
 
@@ -13,7 +13,7 @@ and :class:`smoother.SpatialLoss`, Smoother can be directly installed using `pip
    $ pip install smoother-omics
 
    # or from github (latest version)
-   $ pip install git+https://github.com/JiayuSuPKU/Smoother.git#egg=smoother
+   $ pip install git+https://github.com/JiayuSuPKU/Smoother.git#egg=smoother-omics
 
 .. note::
 
@@ -32,51 +32,45 @@ Minimal software dependencies include
 Full installation
 ------------------------
 
-Models in the dimensionality reduction module (:class:`smoother.SpatialAE`, :class:`smoother.SpatialVAE`) is built upon `scvi-tools`. 
-Here we refer to the `original repository for installation instructions on different systems <https://docs.scvi-tools.org/en/stable/installation.html>`_.
+Models in the dimensionality reduction module (:class:`smoother.models.reduction.SpatialVAE`, :class:`smoother.models.reduction.SpatialANVI`, :class:`smoother.models.reduction.SpatialMULTIVI`)
+is built upon `scvi-tools (v1.4.0) <https://scvi-tools.org/>`_. We refer to the `original repository for installation instructions on different systems <https://docs.scvi-tools.org/en/stable/installation.html>`_.
 
 .. code-block:: zsh
 
-   $ pip install scvi-tools
+   # either separately install scvi-tools
+   $ pip install torch jax scvi-tools==1.4.0
 
-.. note::
+   # or install it together with Smoother
+   $ pip install smoother-omics[scvi]
 
-   scvi-tools` doesn't officially support Apple's M chips yet. To run `SCVI` and the corresponding `SpatialVAE` on Macs with Apple silicon, 
-   a temporary solution is to `compile both Pytorch and PyG on M1 chips using compatible wheel files <https://github.com/rusty1s/pytorch_scatter/issues/241#issuecomment-1086887332>`_.
 
-.. code-block:: zsh
-
-   $ conda install -y clang_osx-arm64 clangxx_osx-arm64 gfortran_osx-arm64
-
-   $ MACOSX_DEPLOYMENT_TARGET=12.3 CC=clang CXX=clang++ python -m pip --no-cache-dir install torch
-
-   $ MACOSX_DEPLOYMENT_TARGET=12.3 CC=clang CXX=clang++ python -m pip --no-cache-dir install torch-geometric
-
-   $ pip install scvi-tools
-
-To solve data imputation and deconvolution models using convex optimization, you need to also install the `'cvxpy' package <https://www.cvxpy.org/>`_.
+To solve data imputation and deconvolution models using convex optimization, you need to also install the `CVXPY package <https://www.cvxpy.org/>`_.
 
 .. code-block:: zsh
 
-   $ conda install -c conda-forge cvxpy
+   # either separately install cvxpy
+   $ pip install cvxpy==1.7.3
 
-To run other functions, e.g., the simulation scripts, we recommend using the conda environment provided in the repo. 
-You can create a new conda environment called 'smoother' and install the package in it using the following commands:
+   # or install it together with Smoother
+   $ pip install smoother-omics[cvxpy]
+
+To run simulation scripts under `/simulation <https://github.com/JiayuSuPKU/Smoother/tree/main/simulation>`_, we recommend using the Conda environment provided in the repo. 
+You can create a new Conda environment called 'smoother' and install the package in it using the following commands:
 
 .. code-block:: zsh
 
    # download the repo from github
-   git clone git@github.com:JiayuSuPKU/Smoother.git
+   $ git clone git@github.com:JiayuSuPKU/Smoother.git
 
    # cd into the repo and create a new conda environment called 'smoother'
-   conda env create --file environment.yml
-   conda activate smoother
+   $ conda env create --file environment.yml
+   $ conda activate smoother
 
    # add the new conda enviroment to Jupyter
-   python -m ipykernel install --user --name=smoother
+   $ python -m ipykernel install --user --name=smoother
 
    # install the package
-   pip install -e .
+   $ pip install -e .[scvi,cvxpy]
 
 The following software dependencies specified in the `environment.yml` will be installed
 
@@ -106,3 +100,7 @@ The following software dependencies specified in the `environment.yml` will be i
       - squidpy
       - fuzzy-c-means
       - scikit-bio==0.5.8
+
+Reporting issues
+------------------------
+If you encounter any issues during installation or usage, please report them on the `GitHub Issues page <https://github.com/JiayuSuPKU/Smoother/issues>`_.

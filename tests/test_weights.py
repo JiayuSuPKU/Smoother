@@ -14,6 +14,7 @@ class TestSpatialWeightMatrix(unittest.TestCase):
             [2, 2]
         ])
         self.spot_ids = np.array([0, 0, 1, 1, 2])
+        np.random.seed(42)
         self.expr = np.random.rand(10, 5)  # 10 genes x 5 spots
         # Dummy image and scale_factors for histology
         self.image = np.random.rand(10, 10, 3)

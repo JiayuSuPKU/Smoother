@@ -11,6 +11,7 @@ class TestImputeModel(unittest.TestCase):
         self.n_missing = 2
         self.n_all = self.n_obs + self.n_missing
         self.n_feature = 3
+        np.random.seed(42)
         self.y_obs = torch.rand(self.n_obs, self.n_feature)
 
         self.coords = np.array([

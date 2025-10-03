@@ -29,7 +29,7 @@ Smoother - A unified spatial dependency framework in PyTorch
    autoapi/smoother/index
 
 Smoother is a Python package built for modeling spatial dependency and enforcing spatial coherence in spatial omics data analysis. 
-Implemented in `Pytorch`, Smoother is modular and ultra-efficient, often capable of analyzing samples tens of thousands of spots in seconds. 
+Implemented in Pytorch, Smoother is modular and ultra-efficient, often capable of analyzing samples tens of thousands of spots in seconds. 
 
 .. image:: ../img/Smoother_overview.png
    :alt: Overview
@@ -41,19 +41,21 @@ and the same model to accommodate data with varying or even zero spatial structu
 into existing non-spatial models and pipelines (e.g. single-cell analyses) and make them spatially aware. 
 In particular, Smoother provides the following functionalities:
 
-1. **Spatial loss**: A quadratic loss equivalent to a multivariate Gaussian (MVN) prior reflecting the spatial structure of the data. It can be used to regularize any spatial random variable of interest.
-2. **Data imputation**: Mitigates technical noise by borrowing information from the neighboring spots. It can also be applied to enhance the resolution of the data to an arbitrary level in seconds.
-3. **Cell-type deconvolution**: Infers the spatially coherent cell-type composition of each spot using reference cell-type expression profiles. Smoother is one of the few deconvolution methods that actually enforce spatial coherence by design.
-4. **Dimension reduction**: Find the spatially aware latent representations of spatial omics data in a model-agnostic manner, such that single-cell data without spatial structure can be jointly analyzed using the same pipeline.
+What it provides:
 
-For method details, check `the Smoother paper (Su Jiayu, et al. 2023) <https://link.springer.com/article/10.1186/s13059-023-03138-x>`_ and the `Supplementary Notes <https://github.com/JiayuSuPKU/Smoother/blob/main/docs/Smoother_sup_notes.pdf>`_.
+1. **Spatial loss:** A quadratic loss equivalent to a Gaussian random field (MVN) prior derived from a boundary-aware graph.
+2. **Imputation and resolution enhancement:** Denoise by borrowing from neighbors and upscale to arbitrary resolutions in seconds.
+3. **Cell-type deconvolution:** Spatially coherent abundance estimates using cell-type references.
+4. **Dimensionality reduction:** Spatially aware embeddings that also enable joint analysis with non-spatial single-cell data.
+
+For method details, please refer to the `Smoother paper (Su Jiayu, et al. 2023) <https://link.springer.com/article/10.1186/s13059-023-03138-x>`_ and the `Supplementary Notes <https://github.com/JiayuSuPKU/Smoother/blob/main/docs/Smoother_sup_notes.pdf>`_.
 Check out the :doc:`installation` and :doc:`usage` sections for further information, including installation instructions and example usages.
 
 .. note::
 
-   This documentation is under active development.
+   This documentation is under active development. More tutorials on scvi-based models will be added soon.
 
-Citation
+Reference
 ---------------
 Su, Jiayu, et al. "Smoother: a unified and modular framework for incorporating structural dependency in spatial omics data." Genome Biology 24.1 (2023): 291.
 https://link.springer.com/article/10.1186/s13059-023-03138-x
