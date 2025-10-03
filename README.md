@@ -1,7 +1,9 @@
 # Smoother: Modular Spatial Regularization for Spatial Omics
-[![DOI](https://zenodo.org/badge/546425993.svg)](https://zenodo.org/doi/10.5281/zenodo.10242921)
 [![PyPI](https://img.shields.io/pypi/v/smoother-omics.svg)](https://pypi.org/project/smoother-omics/)
 [![Downloads](https://static.pepy.tech/badge/smoother-omics)](https://pepy.tech/project/smoother-omics)
+[![Test status](https://github.com/JiayuSuPKU/Smoother/actions/workflows/tests.yml/badge.svg)](https://github.com/JiayuSuPKU/Smoother/actions/workflows/tests.yml)
+[![Build status](https://github.com/JiayuSuPKU/Smoother/actions/workflows/build.yml/badge.svg)](https://github.com/JiayuSuPKU/Smoother/actions/workflows/build.yml)
+
 
 ## A unified and modular framework to incorporate structural dependency
 Smoother is a Python/PyTorch toolkit for modeling spatial dependency and enforcing spatial coherence in spatial omics. It decouples spatial priors (neighbor similarity) from non-spatial likelihoods, so you can plug spatial structure into existing models with minimal changes. It is modular and fast, scaling to tens of thousands of spots in seconds.
@@ -25,7 +27,7 @@ What it provides:
 ### Basic installation
 To use core functionalities (`SpatialWeightMatrix` and `SpatialLoss`), Smoother can be directly installed using `pip` either from github (latest version)
 ```zsh
-pip install git+https://github.com/JiayuSuPKU/Smoother.git#egg=smoother
+pip install git+https://github.com/JiayuSuPKU/Smoother.git#egg=smoother-omics
 ```
 or from PyPI (stable version)
 ```zsh
@@ -43,7 +45,7 @@ To use spatially-aware VAE models (`SpatialVAE`, `SpatialANVI`, `SpatialMULTIVI`
 pip install smoother-omics[scvi]
 ```
 
-To run [simulation scripts](/simulation/README.md), we recommend using the Conda environment provided in the repo. You can create a new conda environment called 'smoother' and install the package in it using the following commands:
+<!-- To run [simulation scripts](/simulation/README.md), we recommend using the Conda environment provided in the repo. You can create a new conda environment called 'smoother' and install the package in it using the following commands:
 ```zsh
 # download the repo from github
 git clone git@github.com:JiayuSuPKU/Smoother.git
@@ -57,7 +59,7 @@ python -m ipykernel install --user --name=smoother
 
 # install the package
 pip install -e .
-```
+``` -->
 
 ## Basic usage
 ### Spatial loss construction
