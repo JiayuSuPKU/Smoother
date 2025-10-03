@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smoother-omics"
-version = "1.0.3"
-description = "A Unified and Modular Framework to Incorporate Structural Dependency in Spatial Omics Data"
+version = "1.1.0"
+description = "Modular loss of spatial dependency for spatial omics data"
 authors = [
   {name = "Jiayu Su"}
 ]
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = "<4"
+requires-python = ">=3.11,<4"
 
 dependencies = [
     "torch",
@@ -20,6 +20,12 @@ dependencies = [
     "pandas",
     "tqdm"
 ]
+
+[project.optional-dependencies]
+plot = ["plotnine", "matplotlib", "seaborn", "scikit-bio"]
+cvxpy = ["cvxpy>=1.7.3", "torch>=2.8.0"]
+scvi = ["scvi-tools>=1.4.0", "jax>=0.7.2", "torch>=2.8.0"]
+full = ["smoother-omics[cvxpy]", "smoother-omics[scvi]", "smoother-omics[plot]"]
 
 [project.urls]
 repository = "https://github.com/JiayuSuPKU/Smoother"
